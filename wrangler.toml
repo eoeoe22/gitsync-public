@@ -1,0 +1,37 @@
+name = "gitsync"
+main = "src/index.js"
+compatibility_date = "2026-03-20"
+
+[vars]
+GITHUB_USERNAME = ""
+TURNSTILE_SECRET_KEY = ""
+TURNSTILE_SITE_KEY = ""
+GITHUB_TOKEN = ""
+PASSWORD = ""
+SESSION_SECRET = ""
+REPO_CONFIGS = """
+[
+  {
+    "name": "repository1",
+    "privateRepo": "repository1",
+    "publicRepo": "repository1-public",
+    "syncFolders": "src,public,migrations",
+    "syncFiles": ".gitignore,README.md,package.json,package-lock.json,wiki_syntax.md"
+  },
+  {
+    "name": "repository2",
+    "privateRepo": "repository2",
+    "publicRepo": "repository2-public",
+    "syncFolders": "src,public",
+    "syncFiles": ".gitignore,README.md,package.json,package-lock.json,schema.sql",
+    "excludeFolders": "public/images"
+  },
+  {
+    "name": "repository3",
+    "privateRepo": "repository3",
+    "publicRepo": "repository3-public",
+    "syncFolders": "public",
+    "syncFiles": "index.js,.gitignore,README.md,package.json,package-lock.json"
+  }
+]
+"""
