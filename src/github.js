@@ -86,6 +86,14 @@ export class Github {
     return res.sha;
   }
 
+  async getRepoInfo(repo) {
+    return await this.raw(`/repos/${this.username}/${repo}`);
+  }
+
+  async listCommits(repo, branch = 'main', page = 1, perPage = 20) {
+    return await this.raw(`/repos/${this.username}/${repo}/commits?sha=${branch}&page=${page}&per_page=${perPage}`);
+  }
+
   async updateRef(repo, branch, commitSha) {
     const res = await this.raw(`/repos/${this.username}/${repo}/git/refs/heads/${branch}`, {
       method: 'PATCH',
