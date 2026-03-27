@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { loginPage, dashboardPage } from './pages.js';
 import { Github } from './github.js';
+import { GoogleGenAI } from '@google/genai';
 
 const app = new Hono();
 
@@ -140,7 +141,7 @@ app.post('/api/sync/plan', async (c) => {
         priFiles.forEach(f => {
             keepPaths.add(f.path);
             if (pubMap.get(f.path) !== f.sha) {
-                toUpload.push(f);
+                toUpload.push({ ...f, pubSha: pubMap.get(f.path) || null });
             }
         });
 
@@ -229,6 +230,190 @@ app.post('/api/sync/commit', async (c) => {
         await gh.updateRef(config.publicRepo, 'main', newCommitSha);
 
         return c.json({ success: true, commitSha: newCommitSha });
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
+// Shared diff-building helper //
+
+function decodeBase64Text(b64) {
+    try {
+        const clean = b64.replace(/\s/g, '');
+        const binaryStr = atob(clean);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+        }
+        if (bytes.includes(0)) return null; // binary file
+        return new TextDecoder('utf-8').decode(bytes);
+    } catch {
+        return null;
+    }
+}
+
+// LCS 기반 unified diff 생성 //
+
+function computeLCS(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1]
+                ? dp[i - 1][j - 1] + 1
+                : Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+    }
+    const ops = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+            ops.unshift({ t: ' ', l: a[i - 1] }); i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            ops.unshift({ t: '+', l: b[j - 1] }); j--;
+        } else {
+            ops.unshift({ t: '-', l: a[i - 1] }); i--;
+        }
+    }
+    return ops;
+}
+
+function formatUnifiedDiff(path, oldLines, newLines, ctx = 3) {
+    const ops = computeLCS(oldLines, newLines);
+    const changed = ops.reduce((acc, op, i) => { if (op.t !== ' ') acc.push(i); return acc; }, []);
+    if (changed.length === 0) return null;
+
+    const groups = [];
+    let gs = -1, ge = -1;
+    for (const idx of changed) {
+        const from = Math.max(0, idx - ctx);
+        const to = Math.min(ops.length - 1, idx + ctx);
+        if (gs === -1) { gs = from; ge = to; }
+        else if (from <= ge + 1) { ge = Math.max(ge, to); }
+        else { groups.push([gs, ge]); gs = from; ge = to; }
+    }
+    groups.push([gs, ge]);
+
+    const lines = [`--- ${path}`, `+++ ${path}`];
+    for (const [s, e] of groups) {
+        let oldLine = 1, newLine = 1;
+        for (let i = 0; i < s; i++) {
+            if (ops[i].t !== '+') oldLine++;
+            if (ops[i].t !== '-') newLine++;
+        }
+        const slice = ops.slice(s, e + 1);
+        const oldCount = slice.filter(o => o.t !== '+').length;
+        const newCount = slice.filter(o => o.t !== '-').length;
+        lines.push(`@@ -${oldLine},${oldCount} +${newLine},${newCount} @@`);
+        slice.forEach(o => lines.push(o.t + o.l));
+    }
+    return lines.join('\n');
+}
+
+async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 300) {
+    const diffSections = [];
+
+    for (const f of toUpload.slice(0, maxFiles)) {
+        try {
+            const newBase64 = await gh.getBlobBuffer(config.privateRepo, f.sha);
+            const newText = decodeBase64Text(newBase64);
+
+            if (newText === null) {
+                diffSections.push(`=== ${f.path} (바이너리 파일, 내용 생략) ===`);
+                continue;
+            }
+
+            if (f.pubSha) {
+                const oldBase64 = await gh.getBlobBuffer(config.publicRepo, f.pubSha);
+                const oldText = decodeBase64Text(oldBase64);
+                if (oldText === null) {
+                    const newLines = newText.split('\n').slice(0, maxLines);
+                    diffSections.push(`=== ${f.path} (수정됨) ===\n${newLines.map(l => '+' + l).join('\n')}`);
+                } else {
+                    const unified = formatUnifiedDiff(
+                        f.path,
+                        oldText.split('\n').slice(0, maxLines),
+                        newText.split('\n').slice(0, maxLines)
+                    );
+                    diffSections.push(`=== ${f.path} (수정됨) ===\n${unified ?? '(변경 없음)'}`);
+                }
+            } else {
+                const newLines = newText.split('\n');
+                const shown = newLines.slice(0, maxLines);
+                const tail = newLines.length > maxLines ? `\n... (이하 ${newLines.length - maxLines}줄 생략)` : '';
+                diffSections.push(`=== ${f.path} (새로 추가됨) ===\n--- /dev/null\n+++ ${f.path}\n@@ -0,0 +1,${shown.length} @@\n${shown.map(l => '+' + l).join('\n')}${tail}`);
+            }
+        } catch (err) {
+            diffSections.push(`=== ${f.path} (diff 생성 실패: ${err.message}) ===`);
+        }
+    }
+
+    if (toUpload.length > maxFiles) {
+        diffSections.push(`... 그 외 ${toUpload.length - maxFiles}개 파일은 내용 생략`);
+    }
+
+    return diffSections.join('\n\n');
+}
+
+// AI Summary Endpoint //
+
+app.post('/api/sync/ai-summary', async (c) => {
+    try {
+        const { toUpload, toDelete, repoIndex } = await c.req.json();
+        const apiKey = c.env.GEMINI_API_KEY;
+        const model = c.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+        const config = getRepoConfig(c.env, repoIndex ?? 0);
+        const gh = new Github(c.env);
+
+        if (!apiKey) {
+            return c.json({ error: 'GEMINI_API_KEY가 설정되지 않았습니다.' }, 500);
+        }
+
+        const ai = new GoogleGenAI({ apiKey });
+
+        const diffLines = [
+            ...toUpload.map(f => `[추가/수정] ${f.path}`),
+            ...toDelete.map(f => `[삭제] ${f.path}`)
+        ].join('\n');
+
+        const diffContent = await buildDiffContent(gh, config, toUpload);
+
+        const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent}\n\n위 변경사항을 한국어로 간결하게 요약해주세요. 어떤 파일들이 추가/수정/삭제되었는지, 그리고 전체적인 변경의 의미와 주요 내용 변화를 설명해주세요.`;
+
+        const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+                thinkingConfig: { thinkingBudget: 1024 }
+            }
+        });
+
+        return c.json({ summary: response.text });
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
+// Raw Diff Text Endpoint //
+
+app.post('/api/sync/diff-raw', async (c) => {
+    try {
+        const { toUpload, toDelete, repoIndex } = await c.req.json();
+        const config = getRepoConfig(c.env, repoIndex ?? 0);
+        const gh = new Github(c.env);
+
+        const header = [
+            ...toUpload.map(f => `[추가/수정] ${f.path}`),
+            ...toDelete.map(f => `[삭제] ${f.path}`)
+        ].join('\n');
+
+        const diffContent = await buildDiffContent(gh, config, toUpload);
+
+        const deletedSection = toDelete.length > 0
+            ? `\n\n[삭제된 파일]\n${toDelete.map(f => `=== ${f.path} (삭제됨) ===`).join('\n')}`
+            : '';
+
+        return c.json({ diff: `[변경 파일 목록]\n${header}${deletedSection}\n\n[파일 내용]\n${diffContent}` });
     } catch (err) {
         return c.text(err.message, 500);
     }
