@@ -234,4 +234,72 @@ app.post('/api/sync/commit', async (c) => {
     }
 });
 
+// Rollback Endpoints //
+
+// Commit rolled-back state to private repository
+app.post('/api/sync/rollback/commit-to-private', async (c) => {
+    try {
+        const body = await c.req.json().catch(() => ({}));
+        const repoIndex = body.repoIndex ?? 0;
+        const commitSha = body.commitSha;
+
+        if (!commitSha) {
+            return c.json({ error: 'commitSha is required' }, 400);
+        }
+
+        const config = getRepoConfig(c.env, repoIndex);
+        const gh = new Github(c.env);
+
+        // Only allow rollback for private repositories
+        const repoInfo = await gh.getRepoInfo(config.privateRepo);
+        if (!repoInfo.private) {
+            return c.json({ error: 'Rollback is only available for private repositories' }, 403);
+        }
+
+        // Reuse the existing tree from the target commit (no re-upload needed)
+        const treeSha = await gh.getCommitTreeSha(config.privateRepo, commitSha);
+        const latestSha = await gh.getLatestCommitSha(config.privateRepo, 'main');
+
+        const shortSha = commitSha.substring(0, 7);
+        const newCommitSha = await gh.createCommit(
+            config.privateRepo,
+            `Rollback to version ${shortSha}\n\nRolled back via GitSync`,
+            treeSha,
+            latestSha
+        );
+
+        await gh.updateRef(config.privateRepo, 'main', newCommitSha);
+
+        return c.json({ success: true, commitSha: newCommitSha });
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
+// List commits from private repo (for version selection)
+app.get('/api/sync/rollback/commits', async (c) => {
+    try {
+        const repoIndex = parseInt(c.req.query('repoIndex') ?? '0');
+        const page = parseInt(c.req.query('page') ?? '1');
+        const config = getRepoConfig(c.env, repoIndex);
+        const gh = new Github(c.env);
+
+        // Only allow rollback for private repositories
+        const repoInfo = await gh.getRepoInfo(config.privateRepo);
+        if (!repoInfo.private) {
+            return c.json({ error: 'Rollback is only available for private repositories' }, 403);
+        }
+
+        const commits = await gh.listCommits(config.privateRepo, 'main', page, 20);
+        return c.json(commits.map(cm => ({
+            sha: cm.sha,
+            message: cm.commit.message,
+            date: cm.commit.committer.date,
+            author: cm.commit.author?.login || cm.commit.committer.name
+        })));
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
 export default app;
