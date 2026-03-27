@@ -1,4 +1,4 @@
-[Cloudwiki에서 읽기](https://wiki.vialinks.xyz/Gitsync)
+[Cloudwiki에서 읽기](https://wiki.vialinks.xyz/wiki/Gitsync)
 
 # 개요
 
