@@ -475,6 +475,131 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       margin-top: 8px;
     }
 
+    .ai-summary-box {
+      margin-top: 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(192, 132, 252, 0.3);
+      border-radius: 12px;
+      display: none;
+    }
+
+    .ai-summary-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(192, 132, 252, 0.2);
+      font-size: 14px;
+      font-weight: 600;
+      color: #c084fc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ai-summary-content {
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--text-main);
+      line-height: 1.7;
+    }
+
+    .ai-summary-content h1, .ai-summary-content h2, .ai-summary-content h3 {
+      margin: 12px 0 6px;
+      font-size: 14px;
+      color: #c084fc;
+    }
+
+    .ai-summary-content p { margin-bottom: 8px; }
+
+    .ai-summary-content ul, .ai-summary-content ol {
+      margin: 4px 0 8px 18px;
+    }
+
+    .ai-summary-content code {
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .ai-summary-content strong { color: #e2e8f0; }
+
+    .ai-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .ai-checkbox-row input[type="checkbox"] {
+      width: auto;
+      background: none;
+      border: none;
+      padding: 0;
+      accent-color: #c084fc;
+      cursor: pointer;
+    }
+
+    .ai-checkbox-row label {
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .diff-text-box {
+      margin-top: 16px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 12px;
+      display: none;
+    }
+
+    .diff-text-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+      font-size: 14px;
+      font-weight: 600;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .diff-text-content {
+      padding: 12px 16px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #a7f3d0;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .copy-btn {
+      width: auto;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 8px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #38bdf8;
+      cursor: pointer;
+      box-shadow: none;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(56, 189, 248, 0.25);
+      transform: none;
+      box-shadow: none;
+    }
+
+    .copy-btn:active { transform: none; }
+
     .private-badge {
       display: inline-block;
       font-size: 9px;
@@ -488,6 +613,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
   </style>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
   <div class="blob blob-1"></div>
@@ -500,18 +626,18 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 </html>`;
 
 export const loginPage = (siteKey) => layout('Login', `
-  <h1>Secure Access</h1>
-  <p class="subtitle">Authenticate to access GitSync</p>
+  <h1>로그인</h1>
+  <p class="subtitle">GitSync</p>
   <div id="errorBox" class="error-msg"></div>
   <form id="loginForm">
     <div class="input-group">
-      <label for="password">System Password</label>
-      <input type="password" id="password" name="password" required placeholder="Enter password...">
+      <label for="password">시스템 비밀번호</label>
+      <input type="password" id="password" name="password" required placeholder="비밀번호를 입력하세요...">
     </div>
     <div class="turnstile-wrapper">
       <div class="cf-turnstile" data-sitekey="${siteKey}" data-theme="dark"></div>
     </div>
-    <button type="submit" id="submitBtn">Authenticate</button>
+    <button type="submit" id="submitBtn">로그인</button>
   </form>
 `, `
 <script>
@@ -524,13 +650,13 @@ export const loginPage = (siteKey) => layout('Login', `
     const turnstileResponse = turnstileElem ? turnstileElem.value : '';
 
     if (!turnstileResponse) {
-      errBox.textContent = "Please complete the Turnstile challenge.";
+      errBox.textContent = "Turnstile 인증을 완료해주세요.";
       errBox.style.display = "block";
       return;
     }
 
     btn.disabled = true;
-    btn.textContent = "Authenticating...";
+    btn.textContent = "인증 중...";
     errBox.style.display = "none";
 
     try {
@@ -544,13 +670,13 @@ export const loginPage = (siteKey) => layout('Login', `
       if (res.ok && data.success) {
         window.location.href = '/';
       } else {
-        throw new Error(data.message || 'Authentication failed');
+        throw new Error(data.message || '인증에 실패했습니다.');
       }
     } catch(e) {
       errBox.textContent = e.message;
       errBox.style.display = "block";
       btn.disabled = false;
-      btn.textContent = "Authenticate";
+      btn.textContent = "로그인";
       turnstile.reset();
     }
   });
@@ -559,7 +685,7 @@ export const loginPage = (siteKey) => layout('Login', `
 
 export const dashboardPage = () => layout('Dashboard', `
   <h1>GitSync</h1>
-  <p class="subtitle">Multi-Repository Synchronization Manager</p>
+  <p class="subtitle">멀티 저장소 동기화 관리자</p>
 
   <div class="tab-bar" id="tabBar"></div>
 
@@ -568,57 +694,79 @@ export const dashboardPage = () => layout('Dashboard', `
   <div class="stats-card">
     <div class="stat-item">
       <div class="stat-val" id="uploadStat">-</div>
-      <div class="stat-label">To Upload</div>
+      <div class="stat-label">업로드</div>
     </div>
     <div class="stat-item">
       <div class="stat-val" id="deleteStat">-</div>
-      <div class="stat-label">To Delete</div>
+      <div class="stat-label">삭제</div>
     </div>
     <div class="stat-item">
-      <div class="stat-val" id="statusStat">Ready</div>
-      <div class="stat-label">Status</div>
+      <div class="stat-val" id="statusStat">준비</div>
+      <div class="stat-label">상태</div>
     </div>
   </div>
 
   <div class="input-group">
-    <label for="commitMessage">Commit Message</label>
-    <input type="text" id="commitMessage" placeholder="Custom commit message (optional)">
+    <label for="commitMessage">커밋 메시지</label>
+    <input type="text" id="commitMessage" placeholder="커밋 메시지 작성 (선택사항)">
+  </div>
+
+  <div class="ai-checkbox-row">
+    <input type="checkbox" id="aiSummaryCheck" checked>
+    <label for="aiSummaryCheck">Gemini AI 요약</label>
+  </div>
+  <div class="ai-checkbox-row">
+    <input type="checkbox" id="diffTextCheck">
+    <label for="diffTextCheck">Diff 텍스트 표시</label>
   </div>
 
   <div class="button-group">
-    <button id="checkBtn" onclick="checkDiffs()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); box-shadow: none;">Check Differences</button>
-    <button id="syncBtn" onclick="startSync()">Synchronize Now</button>
+    <button id="checkBtn" onclick="checkDiffs()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); box-shadow: none;">변경사항 확인</button>
+    <button id="syncBtn" onclick="startSync()">동기화</button>
   </div>
 
-  <button id="logoutBtn" onclick="logout()" style="margin-top:12px; background: rgba(255,255,255,0.1); box-shadow:none;">Logout</button>
+  <button id="logoutBtn" onclick="logout()" style="margin-top:12px; background: rgba(255,255,255,0.1); box-shadow:none;">로그아웃</button>
 
   <div class="diff-list" id="diffList">
     <div class="diff-header">
-      <span>Changed Files</span>
-      <span id="diffCount" style="font-size: 12px; color: var(--text-muted);">0 files</span>
+      <span>변경된 파일</span>
+      <span id="diffCount" style="font-size: 12px; color: var(--text-muted);">0개 파일</span>
     </div>
     <div id="diffItems"></div>
+  </div>
+
+  <div class="ai-summary-box" id="aiSummaryBox">
+    <div class="ai-summary-header">✦ AI 변경사항 요약</div>
+    <div class="ai-summary-content" id="aiSummaryContent"></div>
+  </div>
+
+  <div class="diff-text-box" id="diffTextBox">
+    <div class="diff-text-header">
+      <span>⟩_ Diff 텍스트</span>
+      <button class="copy-btn" onclick="copyDiffText()">클립보드 복사</button>
+    </div>
+    <div class="diff-text-content" id="diffTextContent"></div>
   </div>
 
   <div class="progress-container" id="progressContainer">
     <div class="progress-bar-bg">
       <div class="progress-bar-fill" id="progressBar"></div>
     </div>
-    <div class="progress-text" id="progressText">Analyzing changes...</div>
+    <div class="progress-text" id="progressText">변경사항 분석 중...</div>
   </div>
 
   <div class="log-window" id="logWindow"></div>
 
   <div class="rollback-section" id="rollbackSection">
     <hr class="section-divider">
-    <h2>Version Rollback <span class="private-badge">Private Only</span></h2>
-    <p class="subtitle">Select a commit to rollback the private repository. Run sync afterward to apply changes to the public repository.</p>
+    <h2>버전 롤백 <span class="private-badge">비공개 전용</span></h2>
+    <p class="subtitle">롤백할 커밋을 선택하세요. 비공개 저장소에 적용 후 동기화를 실행하면 공개 저장소에도 반영됩니다.</p>
 
     <div class="commit-list" id="commitList"></div>
-    <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreCommits()" style="display:none;">Load more commits</button>
+    <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreCommits()" style="display:none;">더 보기</button>
 
-    <button class="rollback-btn" id="rollbackBtn" onclick="startRollback()" disabled>Rollback to Selected Version</button>
-    <div class="rollback-warning">This will overwrite the private repository to match the selected version. The public repository will NOT be changed until you run sync.</div>
+    <button class="rollback-btn" id="rollbackBtn" onclick="startRollback()" disabled>선택한 버전으로 롤백</button>
+    <div class="rollback-warning">비공개 저장소가 선택한 버전으로 덮어씌워집니다. 공개 저장소는 동기화를 실행하기 전까지 변경되지 않습니다.</div>
   </div>
 `, `
 <script>
@@ -669,7 +817,7 @@ export const dashboardPage = () => layout('Dashboard', `
     // Reset stats
     document.getElementById('uploadStat').textContent = '-';
     document.getElementById('deleteStat').textContent = '-';
-    document.getElementById('statusStat').textContent = 'Ready';
+    document.getElementById('statusStat').textContent = '준비';
     document.getElementById('diffList').style.display = 'none';
     document.getElementById('diffItems').innerHTML = '';
     document.getElementById('progressContainer').style.display = 'none';
@@ -677,6 +825,10 @@ export const dashboardPage = () => layout('Dashboard', `
     document.getElementById('progressBar').style.background = '';
     document.getElementById('logWindow').style.display = 'none';
     document.getElementById('logWindow').innerHTML = '';
+    document.getElementById('aiSummaryBox').style.display = 'none';
+    document.getElementById('aiSummaryContent').textContent = '';
+    document.getElementById('diffTextBox').style.display = 'none';
+    document.getElementById('diffTextContent').textContent = '';
 
     // Reset and load rollback commits
     resetRollbackUI();
@@ -704,13 +856,17 @@ export const dashboardPage = () => layout('Dashboard', `
     const pText = document.getElementById('progressText');
 
     btn.disabled = true;
-    btn.textContent = 'Checking...';
+    btn.textContent = '확인 중...';
     diffList.style.display = 'none';
     diffItems.innerHTML = '';
+    document.getElementById('aiSummaryBox').style.display = 'none';
+    document.getElementById('aiSummaryContent').textContent = '';
+    document.getElementById('diffTextBox').style.display = 'none';
+    document.getElementById('diffTextContent').textContent = '';
 
     try {
-      statusStat.textContent = 'Checking';
-      pText.textContent = 'Analyzing changes...';
+      statusStat.textContent = '확인 중';
+      pText.textContent = '변경사항 분석 중...';
       pBar.style.width = '30%';
       pBar.style.background = '';
       container.style.display = 'block';
@@ -729,38 +885,92 @@ export const dashboardPage = () => layout('Dashboard', `
       document.getElementById('deleteStat').textContent = toDelete.length;
 
       const total = toUpload.length + toDelete.length;
-      diffCount.textContent = total + ' files';
+      diffCount.textContent = total + '개 파일';
 
       if (total === 0) {
         pBar.style.width = '100%';
-        pText.textContent = 'No changes detected.';
-        statusStat.textContent = 'Synced';
+        pText.textContent = '변경사항이 없습니다.';
+        statusStat.textContent = '동기화됨';
       } else {
         toUpload.forEach(f => {
           const item = document.createElement('div');
           item.className = 'diff-item';
-          item.innerHTML = '<span class="diff-type type-upload">Update</span><span class="diff-path">' + f.path + '</span>';
+          item.innerHTML = '<span class="diff-type type-upload">수정</span><span class="diff-path">' + f.path + '</span>';
           diffItems.appendChild(item);
         });
 
         toDelete.forEach(f => {
           const item = document.createElement('div');
           item.className = 'diff-item';
-          item.innerHTML = '<span class="diff-type type-delete">Delete</span><span class="diff-path">' + f.path + '</span>';
+          item.innerHTML = '<span class="diff-type type-delete">삭제</span><span class="diff-path">' + f.path + '</span>';
           diffItems.appendChild(item);
         });
 
         diffList.style.display = 'block';
         pBar.style.width = '100%';
-        pText.textContent = 'Analysis complete.';
-        statusStat.textContent = 'Ready';
+        pText.textContent = '분석 완료.';
+        statusStat.textContent = '준비';
+
+        const wantAI = document.getElementById('aiSummaryCheck').checked;
+        const wantDiff = document.getElementById('diffTextCheck').checked;
+
+        if (wantAI) {
+          const summaryBox = document.getElementById('aiSummaryBox');
+          const summaryContent = document.getElementById('aiSummaryContent');
+          summaryContent.textContent = 'AI 요약 생성 중...';
+          summaryBox.style.display = 'block';
+          try {
+            const summaryRes = await fetch('/api/sync/ai-summary', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ toUpload, toDelete, repoIndex: currentRepoIndex })
+            });
+            if (!summaryRes.ok) throw new Error(await summaryRes.text());
+            const { summary } = await summaryRes.json();
+            summaryContent.innerHTML = marked.parse(summary);
+          } catch (aiErr) {
+            summaryContent.textContent = 'AI 요약 실패: ' + aiErr.message;
+          }
+        }
+
+        if (wantDiff) {
+          const diffTextBox = document.getElementById('diffTextBox');
+          const diffTextContent = document.getElementById('diffTextContent');
+          diffTextContent.textContent = 'Diff 텍스트 생성 중...';
+          diffTextBox.style.display = 'block';
+          try {
+            const diffRes = await fetch('/api/sync/diff-raw', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ toUpload, toDelete, repoIndex: currentRepoIndex })
+            });
+            if (!diffRes.ok) throw new Error(await diffRes.text());
+            const { diff } = await diffRes.json();
+            diffTextContent.textContent = diff;
+          } catch (diffErr) {
+            diffTextContent.textContent = 'Diff 생성 실패: ' + diffErr.message;
+          }
+        }
       }
     } catch (e) {
-      alert('Error checking differences: ' + e.message);
-      statusStat.textContent = 'Error';
+      alert('변경사항 확인 오류: ' + e.message);
+      statusStat.textContent = '오류';
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Check Differences';
+      btn.textContent = '변경사항 확인';
+    }
+  }
+
+  async function copyDiffText() {
+    const text = document.getElementById('diffTextContent').textContent;
+    const btn = document.querySelector('.copy-btn');
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = '복사됨!';
+      setTimeout(() => { btn.textContent = '클립보드 복사'; }, 2000);
+    } catch {
+      btn.textContent = '복사 실패';
+      setTimeout(() => { btn.textContent = '클립보드 복사'; }, 2000);
     }
   }
 
@@ -777,17 +987,17 @@ export const dashboardPage = () => layout('Dashboard', `
     const statusStat = document.getElementById('statusStat');
 
     btn.disabled = true;
-    btn.textContent = 'Sync in Progress...';
+    btn.textContent = '동기화 중...';
     container.style.display = 'block';
     document.getElementById('logWindow').innerHTML = '';
     pBar.style.background = '';
 
     try {
       const cfg = repoConfigs[currentRepoIndex];
-      log('Starting sync for "' + cfg.name + '" (' + cfg.privateRepo + ' -> ' + cfg.publicRepo + ')...');
-      pText.textContent = 'Generating sync plan...';
+      log('"' + cfg.name + '" 동기화 시작 (' + cfg.privateRepo + ' -> ' + cfg.publicRepo + ')...');
+      pText.textContent = '동기화 계획 생성 중...';
       pBar.style.width = '10%';
-      statusStat.textContent = 'Planning';
+      statusStat.textContent = '계획 중';
 
       const planRes = await fetch('/api/sync/plan', {
         method: 'POST',
@@ -798,33 +1008,33 @@ export const dashboardPage = () => layout('Dashboard', `
       const plan = await planRes.json();
 
       const { toUpload, toDelete, baseTreeSha } = plan;
-      log('Plan generated: ' + toUpload.length + ' files to upload, ' + toDelete.length + ' files to delete.');
+      log('계획 생성 완료: ' + toUpload.length + '개 파일 업로드, ' + toDelete.length + '개 파일 삭제 예정.');
 
       document.getElementById('uploadStat').textContent = toUpload.length;
       document.getElementById('deleteStat').textContent = toDelete.length;
 
       if (toUpload.length === 0 && toDelete.length === 0) {
         pBar.style.width = '100%';
-        pText.textContent = 'Repositories are already completely synced!';
-        statusStat.textContent = 'Synced!';
-        log('No changes detected. Everything is up to date.');
-        btn.textContent = 'Synchronize Now';
+        pText.textContent = '저장소가 이미 동기화되어 있습니다!';
+        statusStat.textContent = '동기화됨!';
+        log('변경사항이 없습니다. 이미 최신 상태입니다.');
+        btn.textContent = '동기화';
         btn.disabled = false;
         return;
       }
 
-      statusStat.textContent = 'Uploading';
+      statusStat.textContent = '업로드 중';
       const chunkSize = 10;
       let uploadedFiles = [];
       let totalToUpload = toUpload.length;
 
       for(let i = 0; i < totalToUpload; i += chunkSize) {
         const chunk = toUpload.slice(i, i + chunkSize);
-        log('Uploading chunk ' + (Math.floor(i/chunkSize) + 1) + ' (' + chunk.length + ' files)...');
+        log('청크 ' + (Math.floor(i/chunkSize) + 1) + ' 업로드 중 (' + chunk.length + '개 파일)...');
 
         const perc = 10 + Math.floor((i / totalToUpload) * 80);
         pBar.style.width = perc + '%';
-        pText.textContent = 'Uploading files (' + i + '/' + totalToUpload + ')...';
+        pText.textContent = '파일 업로드 중 (' + i + '/' + totalToUpload + ')...';
 
         const upRes = await fetch('/api/sync/upload', {
           method: 'POST',
@@ -836,10 +1046,10 @@ export const dashboardPage = () => layout('Dashboard', `
         uploadedFiles.push(...upResult.uploaded);
       }
 
-      log('All files uploaded successfully.');
+      log('모든 파일 업로드 완료.');
       pBar.style.width = '95%';
-      pText.textContent = 'Committing changes...';
-      statusStat.textContent = 'Committing';
+      pText.textContent = '변경사항 커밋 중...';
+      statusStat.textContent = '커밋 중';
 
       const commitMsg = document.getElementById('commitMessage').value;
       const commitRes = await fetch('/api/sync/commit', {
@@ -856,17 +1066,17 @@ export const dashboardPage = () => layout('Dashboard', `
       if (!commitRes.ok) throw new Error(await commitRes.text());
 
       pBar.style.width = '100%';
-      pText.textContent = 'Sync completed successfully!';
-      statusStat.textContent = 'Success!';
-      log('Commit successful. Sync complete!');
+      pText.textContent = '동기화 완료!';
+      statusStat.textContent = '성공!';
+      log('커밋 성공. 동기화 완료!');
 
     } catch (e) {
-      log('ERROR: ' + e.message);
-      pText.textContent = 'Sync failed. See logs.';
+      log('오류: ' + e.message);
+      pText.textContent = '동기화 실패. 로그를 확인하세요.';
       pBar.style.background = 'var(--error)';
-      statusStat.textContent = 'Failed';
+      statusStat.textContent = '실패';
     } finally {
-      btn.textContent = 'Synchronize Now';
+      btn.textContent = '동기화';
       btn.disabled = false;
     }
   }
@@ -947,7 +1157,7 @@ export const dashboardPage = () => layout('Dashboard', `
     if (!selectedCommitSha) return;
 
     const shortSha = selectedCommitSha.substring(0, 7);
-    if (!confirm('Are you sure you want to rollback the private repository to commit ' + shortSha + '?\\n\\nRun sync afterward to apply changes to the public repository.')) {
+    if (!confirm('비공개 저장소를 커밋 ' + shortSha + '으로 롤백하시겠습니까?\\n\\n동기화를 실행하면 공개 저장소에도 변경사항이 반영됩니다.')) {
       return;
     }
 
@@ -958,17 +1168,17 @@ export const dashboardPage = () => layout('Dashboard', `
     const statusStat = document.getElementById('statusStat');
 
     btn.disabled = true;
-    btn.textContent = 'Rolling back...';
+    btn.textContent = '롤백 중...';
     container.style.display = 'block';
     document.getElementById('logWindow').innerHTML = '';
     pBar.style.background = '';
 
     try {
       const cfg = repoConfigs[currentRepoIndex];
-      log('Starting rollback for "' + cfg.name + '" to commit ' + shortSha + '...');
-      pText.textContent = 'Committing rollback to private repository...';
+      log('"' + cfg.name + '" 롤백 시작 - 커밋 ' + shortSha + '으로 복원 중...');
+      pText.textContent = '비공개 저장소에 롤백 커밋 중...';
       pBar.style.width = '50%';
-      statusStat.textContent = 'Rolling back';
+      statusStat.textContent = '롤백 중';
 
       const res = await fetch('/api/sync/rollback/commit-to-private', {
         method: 'POST',
@@ -978,17 +1188,17 @@ export const dashboardPage = () => layout('Dashboard', `
       if (!res.ok) throw new Error(await res.text());
 
       pBar.style.width = '100%';
-      pText.textContent = 'Rollback completed! Run sync to update the public repository.';
-      statusStat.textContent = 'Rolled back!';
-      log('Private repository rolled back to ' + shortSha + '. Run sync to apply to public repo.');
+      pText.textContent = '롤백 완료! 공개 저장소에 적용하려면 동기화를 실행하세요.';
+      statusStat.textContent = '롤백됨!';
+      log('비공개 저장소가 ' + shortSha + '으로 롤백되었습니다. 동기화를 실행하여 공개 저장소에 적용하세요.');
 
     } catch (e) {
-      log('ERROR: ' + e.message);
-      pText.textContent = 'Rollback failed. See logs.';
+      log('오류: ' + e.message);
+      pText.textContent = '롤백 실패. 로그를 확인하세요.';
       pBar.style.background = 'var(--error)';
-      statusStat.textContent = 'Failed';
+      statusStat.textContent = '실패';
     } finally {
-      btn.textContent = 'Rollback to Selected Version';
+      btn.textContent = '선택한 버전으로 롤백';
       btn.disabled = !selectedCommitSha;
     }
   }
