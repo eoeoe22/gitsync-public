@@ -368,6 +368,124 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       gap: 12px;
       margin-top: 12px;
     }
+
+    /* Rollback styles */
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--glass-border);
+      margin: 28px 0 20px;
+    }
+
+    .rollback-section {
+      display: none;
+    }
+
+    .rollback-section h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #f59e0b;
+    }
+
+    .rollback-section .subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .commit-list {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      max-height: 280px;
+      overflow-y: auto;
+      margin-bottom: 16px;
+    }
+
+    .commit-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .commit-item:last-child { border-bottom: none; }
+
+    .commit-item:hover { background: rgba(255, 255, 255, 0.05); }
+
+    .commit-item.selected {
+      background: rgba(245, 158, 11, 0.1);
+      border-left: 3px solid #f59e0b;
+    }
+
+    .commit-radio {
+      margin-top: 3px;
+      accent-color: #f59e0b;
+      flex-shrink: 0;
+    }
+
+    .commit-info { flex: 1; min-width: 0; }
+
+    .commit-msg {
+      font-size: 13px;
+      color: var(--text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .commit-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .commit-sha {
+      font-family: monospace;
+      color: #f59e0b;
+      font-size: 11px;
+    }
+
+    .load-more-btn {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--glass-border);
+      box-shadow: none;
+      padding: 10px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .rollback-btn {
+      background: linear-gradient(135deg, #b45309, #f59e0b) !important;
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4) !important;
+    }
+
+    .rollback-btn:hover {
+      box-shadow: 0 6px 16px rgba(245, 158, 11, 0.6) !important;
+    }
+
+    .rollback-warning {
+      font-size: 11px;
+      color: #f59e0b;
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    .private-badge {
+      display: inline-block;
+      font-size: 9px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-left: 4px;
+    }
   </style>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
@@ -490,6 +608,18 @@ export const dashboardPage = () => layout('Dashboard', `
   </div>
 
   <div class="log-window" id="logWindow"></div>
+
+  <div class="rollback-section" id="rollbackSection">
+    <hr class="section-divider">
+    <h2>Version Rollback <span class="private-badge">Private Only</span></h2>
+    <p class="subtitle">Select a commit to rollback the private repository. Run sync afterward to apply changes to the public repository.</p>
+
+    <div class="commit-list" id="commitList"></div>
+    <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreCommits()" style="display:none;">Load more commits</button>
+
+    <button class="rollback-btn" id="rollbackBtn" onclick="startRollback()" disabled>Rollback to Selected Version</button>
+    <div class="rollback-warning">This will overwrite the private repository to match the selected version. The public repository will NOT be changed until you run sync.</div>
+  </div>
 `, `
 <script>
   let repoConfigs = [];
@@ -547,6 +677,10 @@ export const dashboardPage = () => layout('Dashboard', `
     document.getElementById('progressBar').style.background = '';
     document.getElementById('logWindow').style.display = 'none';
     document.getElementById('logWindow').innerHTML = '';
+
+    // Reset and load rollback commits
+    resetRollbackUI();
+    loadRollbackCommits(1);
   }
 
   function log(msg) {
@@ -734,6 +868,128 @@ export const dashboardPage = () => layout('Dashboard', `
     } finally {
       btn.textContent = 'Synchronize Now';
       btn.disabled = false;
+    }
+  }
+
+  // Rollback state
+  let rollbackCommits = [];
+  let rollbackPage = 1;
+  let selectedCommitSha = null;
+
+  async function loadRollbackCommits(page) {
+    try {
+      const res = await fetch('/api/sync/rollback/commits?repoIndex=' + currentRepoIndex + '&page=' + page);
+      if (res.status === 403) {
+        // Not a private repo - hide rollback section
+        document.getElementById('rollbackSection').style.display = 'none';
+        return;
+      }
+      if (!res.ok) throw new Error(await res.text());
+      const commits = await res.json();
+
+      document.getElementById('rollbackSection').style.display = 'block';
+
+      if (page === 1) {
+        rollbackCommits = commits;
+        document.getElementById('commitList').innerHTML = '';
+      } else {
+        rollbackCommits.push(...commits);
+      }
+
+      const list = document.getElementById('commitList');
+      commits.forEach(cm => {
+        const div = document.createElement('div');
+        div.className = 'commit-item';
+        div.dataset.sha = cm.sha;
+        const date = new Date(cm.date).toLocaleString();
+        const shortSha = cm.sha.substring(0, 7);
+        const msgFirst = cm.message.split('\\n')[0];
+        div.innerHTML = '<input type="radio" name="rollbackCommit" class="commit-radio" value="' + cm.sha + '">'
+          + '<div class="commit-info">'
+          + '<div class="commit-msg">' + msgFirst + '</div>'
+          + '<div class="commit-meta"><span class="commit-sha">' + shortSha + '</span> &middot; ' + cm.author + ' &middot; ' + date + '</div>'
+          + '</div>';
+        div.onclick = (e) => {
+          if (e.target.type !== 'radio') {
+            div.querySelector('input[type=radio]').checked = true;
+          }
+          document.querySelectorAll('.commit-item').forEach(el => el.classList.remove('selected'));
+          div.classList.add('selected');
+          selectedCommitSha = cm.sha;
+          document.getElementById('rollbackBtn').disabled = false;
+        };
+        list.appendChild(div);
+      });
+
+      document.getElementById('loadMoreBtn').style.display = commits.length >= 20 ? 'block' : 'none';
+    } catch (e) {
+      console.error('Failed to load commits:', e);
+      document.getElementById('rollbackSection').style.display = 'none';
+    }
+  }
+
+  function loadMoreCommits() {
+    rollbackPage++;
+    loadRollbackCommits(rollbackPage);
+  }
+
+  function resetRollbackUI() {
+    rollbackCommits = [];
+    rollbackPage = 1;
+    selectedCommitSha = null;
+    document.getElementById('commitList').innerHTML = '';
+    document.getElementById('rollbackBtn').disabled = true;
+    document.getElementById('loadMoreBtn').style.display = 'none';
+    document.getElementById('rollbackSection').style.display = 'none';
+  }
+
+  async function startRollback() {
+    if (!selectedCommitSha) return;
+
+    const shortSha = selectedCommitSha.substring(0, 7);
+    if (!confirm('Are you sure you want to rollback the private repository to commit ' + shortSha + '?\\n\\nRun sync afterward to apply changes to the public repository.')) {
+      return;
+    }
+
+    const btn = document.getElementById('rollbackBtn');
+    const container = document.getElementById('progressContainer');
+    const pBar = document.getElementById('progressBar');
+    const pText = document.getElementById('progressText');
+    const statusStat = document.getElementById('statusStat');
+
+    btn.disabled = true;
+    btn.textContent = 'Rolling back...';
+    container.style.display = 'block';
+    document.getElementById('logWindow').innerHTML = '';
+    pBar.style.background = '';
+
+    try {
+      const cfg = repoConfigs[currentRepoIndex];
+      log('Starting rollback for "' + cfg.name + '" to commit ' + shortSha + '...');
+      pText.textContent = 'Committing rollback to private repository...';
+      pBar.style.width = '50%';
+      statusStat.textContent = 'Rolling back';
+
+      const res = await fetch('/api/sync/rollback/commit-to-private', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ repoIndex: currentRepoIndex, commitSha: selectedCommitSha })
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+      pBar.style.width = '100%';
+      pText.textContent = 'Rollback completed! Run sync to update the public repository.';
+      statusStat.textContent = 'Rolled back!';
+      log('Private repository rolled back to ' + shortSha + '. Run sync to apply to public repo.');
+
+    } catch (e) {
+      log('ERROR: ' + e.message);
+      pText.textContent = 'Rollback failed. See logs.';
+      pBar.style.background = 'var(--error)';
+      statusStat.textContent = 'Failed';
+    } finally {
+      btn.textContent = 'Rollback to Selected Version';
+      btn.disabled = !selectedCommitSha;
     }
   }
 
