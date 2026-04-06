@@ -8,7 +8,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     :root {
-      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      --bg-color: #0f172a;
       --glass-bg: rgba(255, 255, 255, 0.05);
       --glass-border: rgba(255, 255, 255, 0.1);
       --text-main: #f8fafc;
@@ -23,7 +23,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     body {
       font-family: 'Inter', sans-serif;
-      background: var(--bg-gradient);
+      background: var(--bg-color);
       color: var(--text-main);
       min-height: 100vh;
       display: flex;
@@ -427,14 +427,22 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       flex-shrink: 0;
     }
 
-    .commit-info { flex: 1; min-width: 0; }
+    .commit-info { 
+      flex: 1; 
+      min-width: 0; 
+      overflow-x: auto;
+      scrollbar-width: none; /* Hide scrollbar for cleaner look, but still scrollable */
+      -ms-overflow-style: none;
+    }
+
+    .commit-info::-webkit-scrollbar {
+      display: none;
+    }
 
     .commit-msg {
       font-size: 13px;
       color: var(--text-main);
       white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
 
     .commit-meta {
