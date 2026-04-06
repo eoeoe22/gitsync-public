@@ -576,15 +576,21 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .diff-text-content {
       padding: 12px 16px;
-      font-family: monospace;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
       font-size: 11px;
-      color: #a7f3d0;
+      color: #e2e8f0;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-all;
-      max-height: 320px;
+      max-height: 400px;
       overflow-y: auto;
     }
+
+    .line-added { color: #10b981; background: rgba(5, 150, 105, 0.15); display: block; width: 100%; }
+    .line-removed { color: #f87171; background: rgba(220, 38, 38, 0.15); display: block; width: 100%; }
+    .line-hunk { color: #818cf8; font-weight: 600; opacity: 0.8; display: block; background: rgba(99, 102, 241, 0.05); }
+    .line-file-header { color: #38bdf8; font-weight: 700; display: block; padding-top: 8px; margin-top: 8px; border-top: 1px solid rgba(56, 189, 248, 0.1); }
+    .line-meta { color: #94a3b8; font-style: italic; }
 
     .copy-btn {
       width: auto;
@@ -954,7 +960,22 @@ export const dashboardPage = () => layout('Dashboard', `
             });
             if (!diffRes.ok) throw new Error(await diffRes.text());
             const { diff } = await diffRes.json();
-            diffTextContent.textContent = diff;
+            
+            // Colorize diff lines
+            const escaped = (str) => str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
+            const coloredLines = diff.split('\n').map(line => {
+              const safeLine = escaped(line);
+              if (line.startsWith('+') && !line.startsWith('+++')) return '<span class="line-added">' + safeLine + '</span>';
+              if (line.startsWith('-') && !line.startsWith('---')) return '<span class="line-removed">' + safeLine + '</span>';
+              if (line.startsWith('@@')) return '<span class="line-hunk">' + safeLine + '</span>';
+              if (line.startsWith('===') || line.startsWith('Index:') || line.startsWith('---') || line.startsWith('+++') || line.startsWith('===================================================================')) {
+                return '<span class="line-file-header">' + safeLine + '</span>';
+              }
+              if (line.startsWith('[') && line.includes(']')) return '<span class="line-meta">' + safeLine + '</span>';
+              return safeLine;
+            });
+            
+            diffTextContent.innerHTML = coloredLines.join('\n');
           } catch (diffErr) {
             diffTextContent.textContent = 'Diff 생성 실패: ' + diffErr.message;
           }

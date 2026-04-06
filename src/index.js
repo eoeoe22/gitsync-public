@@ -3,6 +3,7 @@ import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { loginPage, dashboardPage } from './pages.js';
 import { Github } from './github.js';
 import { GoogleGenAI } from '@google/genai';
+import { createPatch } from 'diff';
 
 const app = new Hono();
 
@@ -252,65 +253,8 @@ function decodeBase64Text(b64) {
     }
 }
 
-// LCS 기반 unified diff 생성 //
-
-function computeLCS(a, b) {
-    const m = a.length, n = b.length;
-    const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            dp[i][j] = a[i - 1] === b[j - 1]
-                ? dp[i - 1][j - 1] + 1
-                : Math.max(dp[i - 1][j], dp[i][j - 1]);
-        }
-    }
-    const ops = [];
-    let i = m, j = n;
-    while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-            ops.unshift({ t: ' ', l: a[i - 1] }); i--; j--;
-        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-            ops.unshift({ t: '+', l: b[j - 1] }); j--;
-        } else {
-            ops.unshift({ t: '-', l: a[i - 1] }); i--;
-        }
-    }
-    return ops;
-}
-
-function formatUnifiedDiff(path, oldLines, newLines, ctx = 3) {
-    const ops = computeLCS(oldLines, newLines);
-    const changed = ops.reduce((acc, op, i) => { if (op.t !== ' ') acc.push(i); return acc; }, []);
-    if (changed.length === 0) return null;
-
-    const groups = [];
-    let gs = -1, ge = -1;
-    for (const idx of changed) {
-        const from = Math.max(0, idx - ctx);
-        const to = Math.min(ops.length - 1, idx + ctx);
-        if (gs === -1) { gs = from; ge = to; }
-        else if (from <= ge + 1) { ge = Math.max(ge, to); }
-        else { groups.push([gs, ge]); gs = from; ge = to; }
-    }
-    groups.push([gs, ge]);
-
-    const lines = [`--- ${path}`, `+++ ${path}`];
-    for (const [s, e] of groups) {
-        let oldLine = 1, newLine = 1;
-        for (let i = 0; i < s; i++) {
-            if (ops[i].t !== '+') oldLine++;
-            if (ops[i].t !== '-') newLine++;
-        }
-        const slice = ops.slice(s, e + 1);
-        const oldCount = slice.filter(o => o.t !== '+').length;
-        const newCount = slice.filter(o => o.t !== '-').length;
-        lines.push(`@@ -${oldLine},${oldCount} +${newLine},${newCount} @@`);
-        slice.forEach(o => lines.push(o.t + o.l));
-    }
-    return lines.join('\n');
-}
-
-async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 300) {
+// buildDiffContent helper uses 'diff' library to generate standard unified diffs
+async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 500) {
     const diffSections = [];
 
     for (const f of toUpload.slice(0, maxFiles)) {
@@ -319,29 +263,38 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
             const newText = decodeBase64Text(newBase64);
 
             if (newText === null) {
-                diffSections.push(`=== ${f.path} (바이너리 파일, 내용 생략) ===`);
+                diffSections.push(`=== ${f.path} (바이너리 파일 또는 인식 불가, 내용 생략) ===`);
                 continue;
             }
 
             if (f.pubSha) {
                 const oldBase64 = await gh.getBlobBuffer(config.publicRepo, f.pubSha);
                 const oldText = decodeBase64Text(oldBase64);
+                
                 if (oldText === null) {
-                    const newLines = newText.split('\n').slice(0, maxLines);
-                    diffSections.push(`=== ${f.path} (수정됨) ===\n${newLines.map(l => '+' + l).join('\n')}`);
+                    const lines = newText.split('\n');
+                    const shown = lines.slice(0, maxLines);
+                    const tail = lines.length > maxLines ? `\n... (이하 ${lines.length - maxLines}줄 생략)` : '';
+                    diffSections.push(`=== ${f.path} (수정됨: 이전 버전 바이너리) ===\n${shown.map(l => '+' + l).join('\n')}${tail}`);
                 } else {
-                    const unified = formatUnifiedDiff(
-                        f.path,
-                        oldText.split('\n').slice(0, maxLines),
-                        newText.split('\n').slice(0, maxLines)
-                    );
-                    diffSections.push(`=== ${f.path} (수정됨) ===\n${unified ?? '(변경 없음)'}`);
+                    const patch = createPatch(f.path, oldText, newText);
+                    // createPatch returns the whole patch including header. 
+                    // We might want to limit the lines if it's too long.
+                    const patchLines = patch.split('\n');
+                    if (patchLines.length > maxLines) {
+                        diffSections.push(`=== ${f.path} (수정됨) ===\n${patchLines.slice(0, maxLines).join('\n')}\n... (이하 ${patchLines.length - maxLines}줄 생략)`);
+                    } else {
+                        diffSections.push(`=== ${f.path} (수정됨) ===\n${patch}`);
+                    }
                 }
             } else {
-                const newLines = newText.split('\n');
-                const shown = newLines.slice(0, maxLines);
-                const tail = newLines.length > maxLines ? `\n... (이하 ${newLines.length - maxLines}줄 생략)` : '';
-                diffSections.push(`=== ${f.path} (새로 추가됨) ===\n--- /dev/null\n+++ ${f.path}\n@@ -0,0 +1,${shown.length} @@\n${shown.map(l => '+' + l).join('\n')}${tail}`);
+                const patch = createPatch(f.path, '', newText, '', '', { context: 3 });
+                const patchLines = patch.split('\n');
+                if (patchLines.length > maxLines) {
+                    diffSections.push(`=== ${f.path} (새로 추가됨) ===\n${patchLines.slice(0, maxLines).join('\n')}\n... (이하 ${patchLines.length - maxLines}줄 생략)`);
+                } else {
+                    diffSections.push(`=== ${f.path} (새로 추가됨) ===\n${patch}`);
+                }
             }
         } catch (err) {
             diffSections.push(`=== ${f.path} (diff 생성 실패: ${err.message}) ===`);
