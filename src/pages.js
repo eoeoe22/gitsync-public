@@ -768,7 +768,7 @@ export const dashboardPage = () => layout('Dashboard', `
   <div class="rollback-section" id="rollbackSection">
     <hr class="section-divider">
     <h2>버전 롤백 <span class="private-badge">비공개 전용</span></h2>
-    <p class="subtitle">롤백할 커밋을 선택하세요. 비공개 저장소에 적용 후 동기화를 실행하면 공개 저장소에도 반영됩니다.</p>
+    <p class="subtitle">롤백할 커밋을 선택하세요.</p>
 
     <div class="commit-list" id="commitList"></div>
     <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreCommits()" style="display:none;">더 보기</button>
