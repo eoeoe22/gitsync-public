@@ -57,8 +57,8 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       border-radius: 24px;
       padding: 40px;
       width: 100%;
-      max-width: 600px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      max-width: 850px;
+      box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.7);
       animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
@@ -164,41 +164,55 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       display: none;
     }
 
-    /* Tabs */
-    .tab-bar {
-      display: flex;
-      gap: 4px;
+    /* Repository Selection */
+    .repo-select-group {
       margin-bottom: 24px;
-      background: rgba(0,0,0,0.3);
-      border-radius: 12px;
-      padding: 4px;
     }
 
-    .tab-btn {
-      flex: 1;
-      background: transparent;
-      color: var(--text-muted);
-      border: none;
-      border-radius: 8px;
-      padding: 10px 8px;
+    .repo-select-group label {
+      display: block;
+      margin-bottom: 8px;
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    select {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 16px 20px;
+      color: white;
+      font-size: 17px;
+      font-weight: 500;
+      outline: none;
+      appearance: none;
       cursor: pointer;
-      box-shadow: none;
-      transition: all 0.2s;
-      width: auto;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2338bdf8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 20px center;
+      background-size: 18px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
 
-    .tab-btn:hover {
-      color: var(--text-main);
-      transform: none;
-      box-shadow: none;
+    select:hover {
+      background-color: rgba(0, 0, 0, 0.6);
+      border-color: rgba(56, 189, 248, 0.4);
     }
 
-    .tab-btn.active {
-      background: rgba(255,255,255,0.1);
-      color: var(--text-main);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    select:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    select option {
+      background-color: #1e293b;
+      color: white;
+      padding: 12px;
     }
 
     .repo-info {
@@ -236,6 +250,12 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       background: rgba(239, 68, 68, 0.15);
       color: #f87171;
       text-decoration: line-through;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
     }
 
     .stats-card {
@@ -576,21 +596,15 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .diff-text-content {
       padding: 12px 16px;
-      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-family: monospace;
       font-size: 11px;
-      color: #e2e8f0;
+      color: #a7f3d0;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-all;
-      max-height: 400px;
+      max-height: 320px;
       overflow-y: auto;
     }
-
-    .line-added { color: #10b981; background: rgba(5, 150, 105, 0.15); display: block; width: 100%; }
-    .line-removed { color: #f87171; background: rgba(220, 38, 38, 0.15); display: block; width: 100%; }
-    .line-hunk { color: #818cf8; font-weight: 600; opacity: 0.8; display: block; background: rgba(99, 102, 241, 0.05); }
-    .line-file-header { color: #38bdf8; font-weight: 700; display: block; padding-top: 8px; margin-top: 8px; border-top: 1px solid rgba(56, 189, 248, 0.1); }
-    .line-meta { color: #94a3b8; font-style: italic; }
 
     .copy-btn {
       width: auto;
@@ -701,7 +715,10 @@ export const dashboardPage = () => layout('Dashboard', `
   <h1>GitSync</h1>
   <p class="subtitle">멀티 저장소 동기화 관리자</p>
 
-  <div class="tab-bar" id="tabBar"></div>
+  <div class="repo-select-group">
+    <label for="repoSelect">작업 저장소 선택</label>
+    <select id="repoSelect" onchange="selectRepo(this.value)"></select>
+  </div>
 
   <div class="repo-info" id="repoInfo"></div>
 
@@ -786,41 +803,46 @@ export const dashboardPage = () => layout('Dashboard', `
 <script>
   let repoConfigs = [];
   let currentRepoIndex = 0;
+  let rollbackPage = 1;
+  let selectedCommitSha = null;
 
   async function loadConfigs() {
-    const res = await fetch('/api/sync/configs');
-    repoConfigs = await res.json();
-    renderTabs();
-    selectRepo(0);
+    try {
+      const res = await fetch('/api/repos');
+      if (!res.ok) throw new Error('저장소 설정을 불러오지 못했습니다.');
+      repoConfigs = await res.json();
+      renderRepoSelect();
+      if (repoConfigs.length > 0) {
+        selectRepo(0);
+      }
+    } catch (e) {
+      alert(e.message);
+    }
   }
 
-  function renderTabs() {
-    const tabBar = document.getElementById('tabBar');
-    tabBar.innerHTML = '';
+  function renderRepoSelect() {
+    const select = document.getElementById('repoSelect');
+    select.innerHTML = '';
     repoConfigs.forEach((cfg, i) => {
-      const btn = document.createElement('button');
-      btn.className = 'tab-btn' + (i === currentRepoIndex ? ' active' : '');
-      btn.textContent = cfg.name;
-      btn.onclick = () => selectRepo(i);
-      tabBar.appendChild(btn);
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = cfg.name;
+      select.appendChild(opt);
     });
   }
 
   function selectRepo(index) {
-    currentRepoIndex = index;
-    const cfg = repoConfigs[index];
+    currentRepoIndex = parseInt(index);
+    const cfg = repoConfigs[currentRepoIndex];
+    if (!cfg) return;
 
-    // Update tab active state
-    document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-      btn.classList.toggle('active', i === index);
-    });
+    document.getElementById('repoSelect').value = currentRepoIndex;
 
-    // Show repo info
     const folders = cfg.syncFolders ? cfg.syncFolders.split(',').map(s => s.trim()).filter(Boolean) : [];
     const files = cfg.syncFiles ? cfg.syncFiles.split(',').map(s => s.trim()).filter(Boolean) : [];
     const excludeFolders = cfg.excludeFolders ? cfg.excludeFolders.split(',').map(s => s.trim()).filter(Boolean) : [];
 
-    let infoHtml = '<span>' + cfg.privateRepo + '</span> &rarr; <span>' + cfg.publicRepo + '</span>';
+    let infoHtml = '<div><span>' + cfg.privateRepo + '</span> &rarr; <span>' + cfg.publicRepo + '</span></div>';
     infoHtml += '<div class="sync-tags">';
     folders.forEach(f => { infoHtml += '<span class="sync-tag">' + f + '/</span>'; });
     files.forEach(f => { infoHtml += '<span class="sync-tag">' + f + '</span>'; });
@@ -828,7 +850,12 @@ export const dashboardPage = () => layout('Dashboard', `
     infoHtml += '</div>';
     document.getElementById('repoInfo').innerHTML = infoHtml;
 
-    // Reset stats
+    resetUI();
+    resetRollbackUI();
+    loadRollbackCommits(1);
+  }
+
+  function resetUI() {
     document.getElementById('uploadStat').textContent = '-';
     document.getElementById('deleteStat').textContent = '-';
     document.getElementById('statusStat').textContent = '준비';
@@ -843,10 +870,6 @@ export const dashboardPage = () => layout('Dashboard', `
     document.getElementById('aiSummaryContent').textContent = '';
     document.getElementById('diffTextBox').style.display = 'none';
     document.getElementById('diffTextContent').textContent = '';
-
-    // Reset and load rollback commits
-    resetRollbackUI();
-    loadRollbackCommits(1);
   }
 
   function log(msg) {
@@ -928,56 +951,45 @@ export const dashboardPage = () => layout('Dashboard', `
         const wantAI = document.getElementById('aiSummaryCheck').checked;
         const wantDiff = document.getElementById('diffTextCheck').checked;
 
-        if (wantAI) {
+        if (wantAI || wantDiff) {
           const summaryBox = document.getElementById('aiSummaryBox');
           const summaryContent = document.getElementById('aiSummaryContent');
-          summaryContent.textContent = 'AI 요약 생성 중...';
-          summaryBox.style.display = 'block';
-          try {
-            const summaryRes = await fetch('/api/sync/ai-summary', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ toUpload, toDelete, repoIndex: currentRepoIndex })
-            });
-            if (!summaryRes.ok) throw new Error(await summaryRes.text());
-            const { summary } = await summaryRes.json();
-            summaryContent.innerHTML = marked.parse(summary);
-          } catch (aiErr) {
-            summaryContent.textContent = 'AI 요약 실패: ' + aiErr.message;
-          }
-        }
-
-        if (wantDiff) {
           const diffTextBox = document.getElementById('diffTextBox');
           const diffTextContent = document.getElementById('diffTextContent');
-          diffTextContent.textContent = 'Diff 텍스트 생성 중...';
-          diffTextBox.style.display = 'block';
+
+          if (wantAI) {
+            summaryContent.textContent = 'AI 요약 생성 중...';
+            summaryBox.style.display = 'block';
+          }
+          if (wantDiff) {
+            diffTextContent.textContent = 'Diff 텍스트 생성 중...';
+            diffTextBox.style.display = 'block';
+          }
+
           try {
-            const diffRes = await fetch('/api/sync/diff-raw', {
+            const res = await fetch('/api/sync/diff-info', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ toUpload, toDelete, repoIndex: currentRepoIndex })
+              body: JSON.stringify({ 
+                toUpload, 
+                toDelete, 
+                repoIndex: currentRepoIndex,
+                wantAI,
+                wantDiff
+              })
             });
-            if (!diffRes.ok) throw new Error(await diffRes.text());
-            const { diff } = await diffRes.json();
-            
-            // Colorize diff lines
-            const escaped = (str) => str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
-            const coloredLines = diff.split('\n').map(line => {
-              const safeLine = escaped(line);
-              if (line.startsWith('+') && !line.startsWith('+++')) return '<span class="line-added">' + safeLine + '</span>';
-              if (line.startsWith('-') && !line.startsWith('---')) return '<span class="line-removed">' + safeLine + '</span>';
-              if (line.startsWith('@@')) return '<span class="line-hunk">' + safeLine + '</span>';
-              if (line.startsWith('===') || line.startsWith('Index:') || line.startsWith('---') || line.startsWith('+++') || line.startsWith('===================================================================')) {
-                return '<span class="line-file-header">' + safeLine + '</span>';
-              }
-              if (line.startsWith('[') && line.includes(']')) return '<span class="line-meta">' + safeLine + '</span>';
-              return safeLine;
-            });
-            
-            diffTextContent.innerHTML = coloredLines.join('\n');
-          } catch (diffErr) {
-            diffTextContent.textContent = 'Diff 생성 실패: ' + diffErr.message;
+            if (!res.ok) throw new Error(await res.text());
+            const { summary, diff } = await res.json();
+
+            if (wantAI) {
+              summaryContent.innerHTML = summary ? marked.parse(summary) : '요약 생성 실패';
+            }
+            if (wantDiff) {
+              diffTextContent.textContent = diff || 'Diff 생성 실패';
+            }
+          } catch (err) {
+            if (wantAI) summaryContent.textContent = 'AI 요약 실패: ' + err.message;
+            if (wantDiff) diffTextContent.textContent = 'Diff 생성 실패: ' + err.message;
           }
         }
       }
@@ -1110,16 +1122,10 @@ export const dashboardPage = () => layout('Dashboard', `
     }
   }
 
-  // Rollback state
-  let rollbackCommits = [];
-  let rollbackPage = 1;
-  let selectedCommitSha = null;
-
   async function loadRollbackCommits(page) {
     try {
       const res = await fetch('/api/sync/rollback/commits?repoIndex=' + currentRepoIndex + '&page=' + page);
       if (res.status === 403) {
-        // Not a private repo - hide rollback section
         document.getElementById('rollbackSection').style.display = 'none';
         return;
       }
@@ -1129,10 +1135,7 @@ export const dashboardPage = () => layout('Dashboard', `
       document.getElementById('rollbackSection').style.display = 'block';
 
       if (page === 1) {
-        rollbackCommits = commits;
         document.getElementById('commitList').innerHTML = '';
-      } else {
-        rollbackCommits.push(...commits);
       }
 
       const list = document.getElementById('commitList');
@@ -1173,13 +1176,11 @@ export const dashboardPage = () => layout('Dashboard', `
   }
 
   function resetRollbackUI() {
-    rollbackCommits = [];
     rollbackPage = 1;
     selectedCommitSha = null;
     document.getElementById('commitList').innerHTML = '';
     document.getElementById('rollbackBtn').disabled = true;
     document.getElementById('loadMoreBtn').style.display = 'none';
-    document.getElementById('rollbackSection').style.display = 'none';
   }
 
   async function startRollback() {
@@ -1232,7 +1233,6 @@ export const dashboardPage = () => layout('Dashboard', `
     }
   }
 
-  // Load configs on page load
   loadConfigs();
 </script>
 `);

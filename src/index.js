@@ -3,7 +3,7 @@ import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { loginPage, dashboardPage } from './pages.js';
 import { Github } from './github.js';
 import { GoogleGenAI } from '@google/genai';
-import { createPatch } from 'diff';
+import { createTwoFilesPatch } from 'diff';
 
 const app = new Hono();
 
@@ -22,6 +22,19 @@ function getRepoConfig(env, index) {
     }
     return configs[index];
 }
+
+app.get('/api/repos', async (c) => {
+    const configs = getRepoConfigs(c.env);
+    return c.json(configs.map((conf, index) => ({
+        index,
+        name: conf.name,
+        privateRepo: conf.privateRepo,
+        publicRepo: conf.publicRepo,
+        syncFolders: conf.syncFolders,
+        syncFiles: conf.syncFiles,
+        excludeFolders: conf.excludeFolders
+    })));
+});
 
 // Middleware to check authentication on /api/sync/*
 app.use('/api/sync/*', async (c, next) => {
@@ -253,8 +266,7 @@ function decodeBase64Text(b64) {
     }
 }
 
-// buildDiffContent helper uses 'diff' library to generate standard unified diffs
-async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 500) {
+async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 300) {
     const diffSections = [];
 
     for (const f of toUpload.slice(0, maxFiles)) {
@@ -263,7 +275,7 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
             const newText = decodeBase64Text(newBase64);
 
             if (newText === null) {
-                diffSections.push(`=== ${f.path} (바이너리 파일 또는 인식 불가, 내용 생략) ===`);
+                diffSections.push(`=== ${f.path} (바이너리 파일, 내용 생략) ===`);
                 continue;
             }
 
@@ -271,30 +283,36 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
                 const oldBase64 = await gh.getBlobBuffer(config.publicRepo, f.pubSha);
                 const oldText = decodeBase64Text(oldBase64);
                 
-                if (oldText === null) {
-                    const lines = newText.split('\n');
-                    const shown = lines.slice(0, maxLines);
-                    const tail = lines.length > maxLines ? `\n... (이하 ${lines.length - maxLines}줄 생략)` : '';
-                    diffSections.push(`=== ${f.path} (수정됨: 이전 버전 바이너리) ===\n${shown.map(l => '+' + l).join('\n')}${tail}`);
+                const oldLines = oldText === null ? [] : oldText.split('\n');
+                const newLines = newText.split('\n');
+
+                const patch = createTwoFilesPatch(
+                    f.path, f.path, 
+                    oldLines.slice(0, maxLines).join('\n'), 
+                    newLines.slice(0, maxLines).join('\n'),
+                    '', '', { context: 3 }
+                );
+                
+                // Remove the first 4 lines of the patch (header) and use our custom format
+                const patchContent = patch.split('\n').slice(4).join('\n');
+                if (patchContent.trim() === '') {
+                    diffSections.push(`=== ${f.path} (수정됨) ===\n(변경 없음)`);
                 } else {
-                    const patch = createPatch(f.path, oldText, newText);
-                    // createPatch returns the whole patch including header. 
-                    // We might want to limit the lines if it's too long.
-                    const patchLines = patch.split('\n');
-                    if (patchLines.length > maxLines) {
-                        diffSections.push(`=== ${f.path} (수정됨) ===\n${patchLines.slice(0, maxLines).join('\n')}\n... (이하 ${patchLines.length - maxLines}줄 생략)`);
-                    } else {
-                        diffSections.push(`=== ${f.path} (수정됨) ===\n${patch}`);
-                    }
+                    diffSections.push(`=== ${f.path} (수정됨) ===\n${patchContent}`);
                 }
             } else {
-                const patch = createPatch(f.path, '', newText, '', '', { context: 3 });
-                const patchLines = patch.split('\n');
-                if (patchLines.length > maxLines) {
-                    diffSections.push(`=== ${f.path} (새로 추가됨) ===\n${patchLines.slice(0, maxLines).join('\n')}\n... (이하 ${patchLines.length - maxLines}줄 생략)`);
-                } else {
-                    diffSections.push(`=== ${f.path} (새로 추가됨) ===\n${patch}`);
-                }
+                const newLines = newText.split('\n');
+                const shown = newLines.slice(0, maxLines);
+                const tail = newLines.length > maxLines ? `\n... (이하 ${newLines.length - maxLines}줄 생략)` : '';
+                
+                const patch = createTwoFilesPatch(
+                    '/dev/null', f.path,
+                    '',
+                    shown.join('\n'),
+                    '', '', { context: 0 }
+                );
+                const patchContent = patch.split('\n').slice(4).join('\n');
+                diffSections.push(`=== ${f.path} (새로 추가됨) ===\n${patchContent}${tail}`);
             }
         } catch (err) {
             diffSections.push(`=== ${f.path} (diff 생성 실패: ${err.message}) ===`);
@@ -308,65 +326,64 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
     return diffSections.join('\n\n');
 }
 
-// AI Summary Endpoint //
+// Consolidated Diff & Summary Endpoint //
 
-app.post('/api/sync/ai-summary', async (c) => {
+app.post('/api/sync/diff-info', async (c) => {
     try {
-        const { toUpload, toDelete, repoIndex } = await c.req.json();
-        const apiKey = c.env.GEMINI_API_KEY;
-        const model = c.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+        const { toUpload, toDelete, repoIndex, wantAI, wantDiff } = await c.req.json();
         const config = getRepoConfig(c.env, repoIndex ?? 0);
         const gh = new Github(c.env);
 
-        if (!apiKey) {
-            return c.json({ error: 'GEMINI_API_KEY가 설정되지 않았습니다.' }, 500);
+        let diffContent = null;
+        let summary = null;
+        let diffText = null;
+
+        // If either is wanted, we need the diff content
+        if (wantAI || wantDiff) {
+            diffContent = await buildDiffContent(gh, config, toUpload);
         }
 
-        const ai = new GoogleGenAI({ apiKey });
+        if (wantAI) {
+            const apiKey = c.env.GEMINI_API_KEY;
+            const model = c.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+            if (apiKey) {
+                const ai = new GoogleGenAI({ apiKey });
+                const diffLines = [
+                    ...toUpload.map(f => `[추가/수정] ${f.path}`),
+                    ...toDelete.map(f => `[삭제] ${f.path}`)
+                ].join('\n');
 
-        const diffLines = [
-            ...toUpload.map(f => `[추가/수정] ${f.path}`),
-            ...toDelete.map(f => `[삭제] ${f.path}`)
-        ].join('\n');
+                const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 한국어로 간결하게 요약해주세요. 어떤 파일들이 추가/수정/삭제되었는지, 그리고 전체적인 변경의 의미와 주요 내용 변화를 설명해주세요.`;
 
-        const diffContent = await buildDiffContent(gh, config, toUpload);
-
-        const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent}\n\n위 변경사항을 한국어로 간결하게 요약해주세요. 어떤 파일들이 추가/수정/삭제되었는지, 그리고 전체적인 변경의 의미와 주요 내용 변화를 설명해주세요.`;
-
-        const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-                thinkingConfig: { thinkingBudget: 1024 }
+                try {
+                    const response = await ai.models.generateContent({
+                        model,
+                        contents: prompt,
+                        config: { thinkingConfig: { thinkingBudget: 1024 } }
+                    });
+                    summary = response.text;
+                } catch (aiErr) {
+                    summary = `AI 요약 실패: ${aiErr.message}`;
+                }
+            } else {
+                summary = 'GEMINI_API_KEY가 설정되지 않았습니다.';
             }
-        });
+        }
 
-        return c.json({ summary: response.text });
-    } catch (err) {
-        return c.text(err.message, 500);
-    }
-});
+        if (wantDiff) {
+            const header = [
+                ...toUpload.map(f => `[추가/수정] ${f.path}`),
+                ...toDelete.map(f => `[삭제] ${f.path}`)
+            ].join('\n');
 
-// Raw Diff Text Endpoint //
+            const deletedSection = toDelete.length > 0
+                ? `\n\n[삭제된 파일]\n${toDelete.map(f => `=== ${f.path} (삭제됨) ===`).join('\n')}`
+                : '';
 
-app.post('/api/sync/diff-raw', async (c) => {
-    try {
-        const { toUpload, toDelete, repoIndex } = await c.req.json();
-        const config = getRepoConfig(c.env, repoIndex ?? 0);
-        const gh = new Github(c.env);
+            diffText = `[변경 파일 목록]\n${header}${deletedSection}\n\n[파일 내용]\n${diffContent || '(변경사항 없음)'}`;
+        }
 
-        const header = [
-            ...toUpload.map(f => `[추가/수정] ${f.path}`),
-            ...toDelete.map(f => `[삭제] ${f.path}`)
-        ].join('\n');
-
-        const diffContent = await buildDiffContent(gh, config, toUpload);
-
-        const deletedSection = toDelete.length > 0
-            ? `\n\n[삭제된 파일]\n${toDelete.map(f => `=== ${f.path} (삭제됨) ===`).join('\n')}`
-            : '';
-
-        return c.json({ diff: `[변경 파일 목록]\n${header}${deletedSection}\n\n[파일 내용]\n${diffContent}` });
+        return c.json({ summary, diff: diffText });
     } catch (err) {
         return c.text(err.message, 500);
     }
