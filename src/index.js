@@ -330,52 +330,69 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
 
 app.post('/api/sync/diff-info', async (c) => {
     try {
-        const { toUpload, toDelete, repoIndex, wantAI, wantDiff } = await c.req.json();
+        const body = await c.req.json().catch(() => ({}));
+        const toUpload = body.toUpload ?? [];
+        const toDelete = body.toDelete ?? [];
+        const { repoIndex, wantAI, wantDiff, wantCommitMsg } = body;
         const config = getRepoConfig(c.env, repoIndex ?? 0);
         const gh = new Github(c.env);
 
         let diffContent = null;
         let summary = null;
+        let summaryError = null;
         let diffText = null;
+        let commitMessage = null;
+        let commitMessageError = null;
 
-        // If either is wanted, we need the diff content
-        if (wantAI || wantDiff) {
+        if (wantAI || wantDiff || wantCommitMsg) {
             diffContent = await buildDiffContent(gh, config, toUpload);
         }
 
+        const diffLines = [
+            ...toUpload.map(f => `[추가/수정] ${f.path}`),
+            ...toDelete.map(f => `[삭제] ${f.path}`)
+        ].join('\n');
+
+        const apiKey = c.env.GEMINI_API_KEY;
+        const model = c.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+        const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+
+        const callGemini = async (prompt, budget = 1024) => {
+            if (!ai) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
+            const response = await ai.models.generateContent({
+                model,
+                contents: prompt,
+                config: { thinkingConfig: { thinkingBudget: budget } }
+            });
+            return response.text;
+        };
+
+        const tasks = [];
+
         if (wantAI) {
-            const apiKey = c.env.GEMINI_API_KEY;
-            const model = c.env.GEMINI_MODEL || 'gemini-3-flash-preview';
-            if (apiKey) {
-                const ai = new GoogleGenAI({ apiKey });
-                const diffLines = [
-                    ...toUpload.map(f => `[추가/수정] ${f.path}`),
-                    ...toDelete.map(f => `[삭제] ${f.path}`)
-                ].join('\n');
-
-                const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 한국어로 간결하게 요약해주세요. 어떤 파일들이 추가/수정/삭제되었는지, 그리고 전체적인 변경의 의미와 주요 내용 변화를 설명해주세요.`;
-
-                try {
-                    const response = await ai.models.generateContent({
-                        model,
-                        contents: prompt,
-                        config: { thinkingConfig: { thinkingBudget: 1024 } }
-                    });
-                    summary = response.text;
-                } catch (aiErr) {
-                    summary = `AI 요약 실패: ${aiErr.message}`;
-                }
-            } else {
-                summary = 'GEMINI_API_KEY가 설정되지 않았습니다.';
-            }
+            const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 한국어로 간결하게 요약해주세요. 어떤 파일들이 추가/수정/삭제되었는지, 그리고 전체적인 변경의 의미와 주요 내용 변화를 설명해주세요.`;
+            tasks.push(
+                callGemini(prompt, 1024)
+                    .then(text => { summary = text; })
+                    .catch(err => { summaryError = err.message; })
+            );
         }
 
-        if (wantDiff) {
-            const header = [
-                ...toUpload.map(f => `[추가/수정] ${f.path}`),
-                ...toDelete.map(f => `[삭제] ${f.path}`)
-            ].join('\n');
+        if (wantCommitMsg) {
+            const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 한 줄짜리 간결한 Git 커밋 메시지로 한국어로 작성해주세요. 요구사항:\n- 한 줄로만 작성 (50자 이내 권장)\n- 마침표, 따옴표, 설명, 머릿말 없이 커밋 메시지 본문만 출력\n- 동사형 서술(예: "로그인 폼 검증 로직 추가", "라우터 초기화 버그 수정")`;
+            tasks.push(
+                callGemini(prompt, 512)
+                    .then(text => {
+                        commitMessage = (text || '').trim().split('\n')[0].trim().replace(/^["'`]+|["'`]+$/g, '');
+                    })
+                    .catch(err => { commitMessageError = err.message; })
+            );
+        }
 
+        await Promise.all(tasks);
+
+        if (wantDiff) {
+            const header = diffLines;
             const deletedSection = toDelete.length > 0
                 ? `\n\n[삭제된 파일]\n${toDelete.map(f => `=== ${f.path} (삭제됨) ===`).join('\n')}`
                 : '';
@@ -383,7 +400,7 @@ app.post('/api/sync/diff-info', async (c) => {
             diffText = `[변경 파일 목록]\n${header}${deletedSection}\n\n[파일 내용]\n${diffContent || '(변경사항 없음)'}`;
         }
 
-        return c.json({ summary, diff: diffText });
+        return c.json({ summary, summaryError, diff: diffText, commitMessage, commitMessageError });
     } catch (err) {
         return c.text(err.message, 500);
     }

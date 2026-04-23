@@ -747,7 +747,11 @@ export const dashboardPage = () => layout('Dashboard', `
     <label for="aiSummaryCheck">Gemini AI 요약</label>
   </div>
   <div class="ai-checkbox-row">
-    <input type="checkbox" id="diffTextCheck">
+    <input type="checkbox" id="aiCommitMsgCheck" checked>
+    <label for="aiCommitMsgCheck">Gemini AI 커밋 메시지 자동 생성</label>
+  </div>
+  <div class="ai-checkbox-row">
+    <input type="checkbox" id="diffTextCheck" checked>
     <label for="diffTextCheck">Diff 텍스트 표시</label>
   </div>
 
@@ -805,6 +809,7 @@ export const dashboardPage = () => layout('Dashboard', `
   let currentRepoIndex = 0;
   let rollbackPage = 1;
   let selectedCommitSha = null;
+  let lastAutoCommitMsg = '';
 
   async function loadConfigs() {
     try {
@@ -950,8 +955,10 @@ export const dashboardPage = () => layout('Dashboard', `
 
         const wantAI = document.getElementById('aiSummaryCheck').checked;
         const wantDiff = document.getElementById('diffTextCheck').checked;
+        const wantCommitMsg = document.getElementById('aiCommitMsgCheck').checked;
+        const commitMsgInput = document.getElementById('commitMessage');
 
-        if (wantAI || wantDiff) {
+        if (wantAI || wantDiff || wantCommitMsg) {
           const summaryBox = document.getElementById('aiSummaryBox');
           const summaryContent = document.getElementById('aiSummaryContent');
           const diffTextBox = document.getElementById('diffTextBox');
@@ -965,32 +972,73 @@ export const dashboardPage = () => layout('Dashboard', `
             diffTextContent.textContent = 'Diff 텍스트 생성 중...';
             diffTextBox.style.display = 'block';
           }
-
-          try {
-            const res = await fetch('/api/sync/diff-info', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ 
-                toUpload, 
-                toDelete, 
-                repoIndex: currentRepoIndex,
-                wantAI,
-                wantDiff
-              })
-            });
-            if (!res.ok) throw new Error(await res.text());
-            const { summary, diff } = await res.json();
-
-            if (wantAI) {
-              summaryContent.innerHTML = summary ? marked.parse(summary) : '요약 생성 실패';
-            }
-            if (wantDiff) {
-              diffTextContent.textContent = diff || 'Diff 생성 실패';
-            }
-          } catch (err) {
-            if (wantAI) summaryContent.textContent = 'AI 요약 실패: ' + err.message;
-            if (wantDiff) diffTextContent.textContent = 'Diff 생성 실패: ' + err.message;
+          let prevCommitMsgValue = '';
+          let userEditedCommitMsg = false;
+          if (wantCommitMsg) {
+            prevCommitMsgValue = commitMsgInput.value;
+            userEditedCommitMsg = prevCommitMsgValue !== '' && prevCommitMsgValue !== lastAutoCommitMsg;
+            commitMsgInput.placeholder = 'AI 커밋 메시지 생성 중...';
+            if (!userEditedCommitMsg) commitMsgInput.value = '';
           }
+
+          const postDiffInfo = (flags) => fetch('/api/sync/diff-info', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ toUpload, toDelete, repoIndex: currentRepoIndex, ...flags })
+          }).then(async r => {
+            if (!r.ok) throw new Error(await r.text());
+            return r.json();
+          });
+
+          const tasks = [];
+
+          if (wantDiff) {
+            tasks.push(
+              postDiffInfo({ wantDiff: true })
+                .then(({ diff }) => {
+                  diffTextContent.textContent = diff || 'Diff 생성 실패';
+                })
+                .catch(err => {
+                  diffTextContent.textContent = 'Diff 생성 실패: ' + err.message;
+                })
+            );
+          }
+
+          if (wantAI || wantCommitMsg) {
+            tasks.push(
+              postDiffInfo({ wantAI, wantCommitMsg })
+                .then(({ summary, summaryError, commitMessage, commitMessageError }) => {
+                  if (wantAI) {
+                    if (summaryError) {
+                      summaryContent.textContent = 'AI 요약 실패: ' + summaryError;
+                    } else {
+                      summaryContent.innerHTML = summary ? marked.parse(summary) : '요약 생성 실패';
+                    }
+                  }
+                  if (wantCommitMsg) {
+                    if (commitMessageError) {
+                      commitMsgInput.placeholder = '커밋 메시지 자동 생성 실패: ' + commitMessageError;
+                      commitMsgInput.value = userEditedCommitMsg ? prevCommitMsgValue : '';
+                    } else {
+                      commitMsgInput.placeholder = '커밋 메시지 작성 (선택사항)';
+                      if (commitMessage && !userEditedCommitMsg) {
+                        commitMsgInput.value = commitMessage;
+                        lastAutoCommitMsg = commitMessage;
+                      }
+                    }
+                  }
+                })
+                .catch(err => {
+                  if (wantAI) summaryContent.textContent = 'AI 요약 실패: ' + err.message;
+                  if (wantCommitMsg) {
+                    commitMsgInput.placeholder = '커밋 메시지 자동 생성 실패: ' + err.message;
+                    commitMsgInput.value = userEditedCommitMsg ? prevCommitMsgValue : '';
+                  }
+                })
+            );
+          }
+
+          await Promise.all(tasks);
         }
       }
     } catch (e) {
