@@ -259,71 +259,78 @@ function decodeBase64Text(b64) {
         for (let i = 0; i < binaryStr.length; i++) {
             bytes[i] = binaryStr.charCodeAt(i);
         }
-        if (bytes.includes(0)) return null; // binary file
-        return new TextDecoder('utf-8').decode(bytes);
+        if (bytes.includes(0)) return null;
+        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
         return null;
     }
 }
 
-async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 300) {
-    const diffSections = [];
+function extractPatchBody(patch) {
+    if (patch.startsWith('@@')) return patch;
+    const idx = patch.indexOf('\n@@');
+    if (idx === -1) return '';
+    return patch.substring(idx + 1);
+}
 
-    for (const f of toUpload.slice(0, maxFiles)) {
-        try {
-            const newBase64 = await gh.getBlobBuffer(config.privateRepo, f.sha);
-            const newText = decodeBase64Text(newBase64);
+function truncatePatchBody(body, maxLines) {
+    const lines = body.split('\n');
+    if (lines.length <= maxLines) return body;
+    const omitted = lines.length - maxLines;
+    return `${lines.slice(0, maxLines).join('\n')}\n... (이하 ${omitted}줄 생략)`;
+}
 
-            if (newText === null) {
-                diffSections.push(`=== ${f.path} (바이너리 파일, 내용 생략) ===`);
-                continue;
-            }
+async function buildFileDiff(gh, config, f, maxLines, maxInputChars) {
+    const [newBase64, oldBase64] = await Promise.all([
+        gh.getBlobBuffer(config.privateRepo, f.sha),
+        f.pubSha ? gh.getBlobBuffer(config.publicRepo, f.pubSha) : Promise.resolve(null)
+    ]);
 
-            if (f.pubSha) {
-                const oldBase64 = await gh.getBlobBuffer(config.publicRepo, f.pubSha);
-                const oldText = decodeBase64Text(oldBase64);
-                
-                const oldLines = oldText === null ? [] : oldText.split('\n');
-                const newLines = newText.split('\n');
-
-                const patch = createTwoFilesPatch(
-                    f.path, f.path, 
-                    oldLines.slice(0, maxLines).join('\n'), 
-                    newLines.slice(0, maxLines).join('\n'),
-                    '', '', { context: 3 }
-                );
-                
-                // Remove the first 4 lines of the patch (header) and use our custom format
-                const patchContent = patch.split('\n').slice(4).join('\n');
-                if (patchContent.trim() === '') {
-                    diffSections.push(`=== ${f.path} (수정됨) ===\n(변경 없음)`);
-                } else {
-                    diffSections.push(`=== ${f.path} (수정됨) ===\n${patchContent}`);
-                }
-            } else {
-                const newLines = newText.split('\n');
-                const shown = newLines.slice(0, maxLines);
-                const tail = newLines.length > maxLines ? `\n... (이하 ${newLines.length - maxLines}줄 생략)` : '';
-                
-                const patch = createTwoFilesPatch(
-                    '/dev/null', f.path,
-                    '',
-                    shown.join('\n'),
-                    '', '', { context: 0 }
-                );
-                const patchContent = patch.split('\n').slice(4).join('\n');
-                diffSections.push(`=== ${f.path} (새로 추가됨) ===\n${patchContent}${tail}`);
-            }
-        } catch (err) {
-            diffSections.push(`=== ${f.path} (diff 생성 실패: ${err.message}) ===`);
-        }
+    const newText = decodeBase64Text(newBase64);
+    if (newText === null) {
+        return `=== ${f.path} (바이너리 파일, 내용 생략) ===`;
     }
+
+    if (f.pubSha) {
+        const oldText = decodeBase64Text(oldBase64);
+        const oldStr = oldText === null ? '' : oldText;
+
+        if (oldStr.length > maxInputChars || newText.length > maxInputChars) {
+            return `=== ${f.path} (수정됨, 파일이 너무 커서 diff 생략) ===`;
+        }
+
+        const patch = createTwoFilesPatch(f.path, f.path, oldStr, newText, '', '', { context: 3 });
+        const body = extractPatchBody(patch);
+        if (body.trim() === '') {
+            return `=== ${f.path} (수정됨) ===\n(변경 없음)`;
+        }
+        return `=== ${f.path} (수정됨) ===\n${truncatePatchBody(body, maxLines)}`;
+    }
+
+    if (newText.length > maxInputChars) {
+        return `=== ${f.path} (새로 추가됨, 파일이 너무 커서 내용 생략) ===`;
+    }
+
+    const patch = createTwoFilesPatch('/dev/null', f.path, '', newText, '', '', { context: 0 });
+    const body = extractPatchBody(patch);
+    return `=== ${f.path} (새로 추가됨) ===\n${truncatePatchBody(body, maxLines)}`;
+}
+
+async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 300, maxInputChars = 200 * 1024) {
+    const targets = toUpload.slice(0, maxFiles);
+
+    const sections = await Promise.all(
+        targets.map(f =>
+            buildFileDiff(gh, config, f, maxLines, maxInputChars)
+                .catch(err => `=== ${f.path} (diff 생성 실패: ${err.message}) ===`)
+        )
+    );
 
     if (toUpload.length > maxFiles) {
-        diffSections.push(`... 그 외 ${toUpload.length - maxFiles}개 파일은 내용 생략`);
+        sections.push(`... 그 외 ${toUpload.length - maxFiles}개 파일은 내용 생략`);
     }
 
-    return diffSections.join('\n\n');
+    return sections.join('\n\n');
 }
 
 // Consolidated Diff & Summary Endpoint //
