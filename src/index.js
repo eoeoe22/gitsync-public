@@ -23,6 +23,172 @@ function getRepoConfig(env, index) {
     return configs[index];
 }
 
+function parseCsv(value) {
+    return (value || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function createSyncPathFilter(config) {
+    const allowedFolders = parseCsv(config.syncFolders);
+    const allowedFiles = parseCsv(config.syncFiles);
+    const excludedFolders = parseCsv(config.excludeFolders);
+
+    return (item) => {
+        const topLevel = item.path.split('/')[0];
+        if (!allowedFolders.includes(topLevel) && !allowedFiles.includes(item.path)) return false;
+        if (excludedFolders.some(ex => item.path === ex || item.path.startsWith(ex + '/'))) return false;
+        return true;
+    };
+}
+
+async function buildSyncPlan(gh, config) {
+    const priCommit = await gh.getLatestCommitSha(config.privateRepo, 'main');
+    const pubCommit = await gh.getLatestCommitSha(config.publicRepo, 'main');
+
+    const priTreeSha = await gh.getCommitTreeSha(config.privateRepo, priCommit);
+    const pubTreeSha = await gh.getCommitTreeSha(config.publicRepo, pubCommit);
+
+    const priTree = await gh.getTreeRecursive(config.privateRepo, priTreeSha);
+    const pubTree = await gh.getTreeRecursive(config.publicRepo, pubTreeSha);
+    const filterPaths = createSyncPathFilter(config);
+
+    const priFiles = priTree.filter(item => filterPaths(item) && item.type === 'blob');
+    const pubFiles = pubTree.filter(item => filterPaths(item) && item.type === 'blob');
+
+    const pubMap = new Map(pubFiles.map(f => [f.path, f.sha]));
+
+    const toUpload = [];
+    const keepPaths = new Set();
+
+    priFiles.forEach(f => {
+        keepPaths.add(f.path);
+        if (pubMap.get(f.path) !== f.sha) {
+            toUpload.push({ ...f, pubSha: pubMap.get(f.path) || null });
+        }
+    });
+
+    const toDelete = pubFiles.filter(f => !keepPaths.has(f.path));
+
+    return {
+        toUpload,
+        toDelete,
+        baseTreeSha: pubTreeSha
+    };
+}
+
+function countPlanChanges(plan) {
+    return plan.toUpload.length + plan.toDelete.length;
+}
+
+function truncateText(text, maxLength) {
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function formatChangedPath(path, prefix) {
+    return `${prefix} ${truncateText(path, 110)}`;
+}
+
+function buildDiscordPayload(changedResults, errors, checkedAt) {
+    const totalChanges = changedResults.reduce((sum, result) => sum + result.total, 0);
+    const omittedRepos = Math.max(0, changedResults.length - 10);
+    const contentParts = [
+        `GitSync daily diff check found ${changedResults.length} out-of-sync repo(s), ${totalChanges} file change(s).`,
+        `Checked at ${checkedAt} UTC.`
+    ];
+
+    if (omittedRepos > 0) {
+        contentParts.push(`${omittedRepos} additional repo(s) omitted from this Discord message.`);
+    }
+
+    if (errors.length > 0) {
+        contentParts.push(`${errors.length} repo check(s) failed; see Worker logs.`);
+    }
+
+    const embeds = changedResults.slice(0, 10).map(({ config, plan, total }) => {
+        const changedFiles = [
+            ...plan.toUpload.slice(0, 8).map(f => formatChangedPath(f.path, '+')),
+            ...plan.toDelete.slice(0, 8).map(f => formatChangedPath(f.path, '-'))
+        ];
+        const omittedFiles = total - changedFiles.length;
+
+        if (omittedFiles > 0) {
+            changedFiles.push(`... ${omittedFiles} more`);
+        }
+
+        return {
+            title: `${config.name || config.publicRepo} (${total} file change(s))`,
+            description: [
+                `Source: \`${config.privateRepo}\``,
+                `Target: \`${config.publicRepo}\``,
+                `Upload/update: **${plan.toUpload.length}**, delete: **${plan.toDelete.length}**`,
+                changedFiles.length > 0 ? `\`\`\`diff\n${changedFiles.join('\n')}\n\`\`\`` : ''
+            ].filter(Boolean).join('\n'),
+            color: 0xf59e0b
+        };
+    });
+
+    return {
+        username: 'GitSync',
+        content: truncateText(contentParts.join(' '), 2000),
+        embeds
+    };
+}
+
+async function sendDiscordWebhook(env, payload) {
+    const webhookUrl = env.DISCORD_WEBHOOK_URL;
+    if (!webhookUrl) {
+        console.warn('DISCORD_WEBHOOK_URL is not configured; skipping Discord notification.');
+        return { sent: false, reason: 'missing_webhook_url' };
+    }
+
+    const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`Discord webhook failed: ${res.status} ${body}`);
+    }
+
+    return { sent: true };
+}
+
+async function runScheduledDiffCheck(env) {
+    const configs = getRepoConfigs(env);
+    const gh = new Github(env);
+    const results = [];
+    const errors = [];
+
+    for (const [index, config] of configs.entries()) {
+        try {
+            const plan = await buildSyncPlan(gh, config);
+            const total = countPlanChanges(plan);
+            results.push({ index, config, plan, total });
+        } catch (err) {
+            console.error(`Scheduled diff check failed for repo index ${index}:`, err);
+            errors.push({ index, config, error: err.message });
+        }
+    }
+
+    const changedResults = results.filter(result => result.total > 0);
+    if (changedResults.length === 0) {
+        console.log('Scheduled diff check completed: all configured repos are in sync.');
+        return { notified: false, changedRepos: 0, errors };
+    }
+
+    const checkedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const payload = buildDiscordPayload(changedResults, errors, checkedAt);
+    const notification = await sendDiscordWebhook(env, payload);
+
+    return {
+        notified: notification.sent,
+        changedRepos: changedResults.length,
+        errors
+    };
+}
+
 app.get('/api/repos', async (c) => {
     const configs = getRepoConfigs(c.env);
     return c.json(configs.map((conf, index) => ({
@@ -123,49 +289,7 @@ app.post('/api/sync/plan', async (c) => {
         const repoIndex = body.repoIndex ?? 0;
         const config = getRepoConfig(c.env, repoIndex);
         const gh = new Github(c.env);
-
-        const priCommit = await gh.getLatestCommitSha(config.privateRepo, 'main');
-        const pubCommit = await gh.getLatestCommitSha(config.publicRepo, 'main');
-
-        const priTreeSha = await gh.getCommitTreeSha(config.privateRepo, priCommit);
-        const pubTreeSha = await gh.getCommitTreeSha(config.publicRepo, pubCommit);
-
-        const priTree = await gh.getTreeRecursive(config.privateRepo, priTreeSha);
-        const pubTree = await gh.getTreeRecursive(config.publicRepo, pubTreeSha);
-
-        // Use per-repo sync folders/files config
-        const allowedFolders = (config.syncFolders || '').split(',').map(s => s.trim()).filter(Boolean);
-        const allowedFiles = (config.syncFiles || '').split(',').map(s => s.trim()).filter(Boolean);
-        const excludedFolders = (config.excludeFolders || '').split(',').map(s => s.trim()).filter(Boolean);
-        const filterPaths = (item) => {
-            const topLevel = item.path.split('/')[0];
-            if (!allowedFolders.includes(topLevel) && !allowedFiles.includes(item.path)) return false;
-            if (excludedFolders.some(ex => item.path === ex || item.path.startsWith(ex + '/'))) return false;
-            return true;
-        };
-
-        const priFiles = priTree.filter(item => filterPaths(item) && item.type === 'blob');
-        const pubFiles = pubTree.filter(item => filterPaths(item) && item.type === 'blob');
-
-        const pubMap = new Map(pubFiles.map(f => [f.path, f.sha]));
-
-        const toUpload = [];
-        const keepPaths = new Set();
-
-        priFiles.forEach(f => {
-            keepPaths.add(f.path);
-            if (pubMap.get(f.path) !== f.sha) {
-                toUpload.push({ ...f, pubSha: pubMap.get(f.path) || null });
-            }
-        });
-
-        const toDelete = pubFiles.filter(f => !keepPaths.has(f.path));
-
-        return c.json({
-            toUpload,
-            toDelete,
-            baseTreeSha: pubTreeSha
-        });
+        return c.json(await buildSyncPlan(gh, config));
     } catch (err) {
         return c.text(err.message, 500);
     }
@@ -481,4 +605,12 @@ app.get('/api/sync/rollback/commits', async (c) => {
     }
 });
 
-export default app;
+export default {
+    fetch(request, env, ctx) {
+        return app.fetch(request, env, ctx);
+    },
+
+    scheduled(controller, env, ctx) {
+        ctx.waitUntil(runScheduledDiffCheck(env));
+    }
+};
