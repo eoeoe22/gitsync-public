@@ -2,6 +2,11 @@ name = "gitsync"
 main = "src/index.js"
 compatibility_date = "2026-03-20"
 
+
+[triggers]
+crons = ["0 0 * * *"]
+
+
 [vars]
 GITHUB_USERNAME = ""
 TURNSTILE_SECRET_KEY = ""
