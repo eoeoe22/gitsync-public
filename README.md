@@ -25,6 +25,11 @@ GITHUB_TOKEN, TURNSTILE_SECRET_KEY 는 각각 [Github](https://github.com), [Clo
 - SESSION_SECRET = ""
 > 이 환경 변수들은 더미 값으로 설정했다가 추후 Cloudflare Workers 대시보드에서 `비밀` 변수로 직접 주입하는것을 권장합니다.
 
+REPO_CONFIGS = """
+"""
+부분은 https://vialinks.xyz/gitsync-json 에서 설정 후 출력된 JSON 설정을 붙여넣으세요.
+
+
 
 설정이 완료되면 자신의 Github 계정으로 프라이빗 레포지토리를 생성하고, 코드 전체를 업로드 후 Cloudflare Workers 대시보드에서 해당 프라이빗 레포지토리를 선택해 Workers로 등록합니다.
 
