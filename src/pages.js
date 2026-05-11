@@ -8,14 +8,17 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     :root {
-      --bg-color: #0f172a;
-      --glass-bg: rgba(255, 255, 255, 0.05);
-      --glass-border: rgba(255, 255, 255, 0.1);
-      --text-main: #f8fafc;
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-2: #273449;
+      --border: #334155;
+      --text-main: #f1f5f9;
       --text-muted: #94a3b8;
-      --accent: #6b21a8;
-      --accent-hover: #9333ea;
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --info: #38bdf8;
       --success: #10b981;
+      --warning: #f59e0b;
       --error: #ef4444;
     }
 
@@ -23,58 +26,31 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     body {
       font-family: 'Inter', sans-serif;
-      background: var(--bg-color);
+      background: var(--bg);
       color: var(--text-main);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow-x: hidden;
     }
 
-    .blob {
-      position: absolute;
-      filter: blur(80px);
-      z-index: 0;
-      opacity: 0.6;
-      animation: float 10s infinite ease-in-out alternate;
-    }
-    .blob-1 { top: -10%; left: -10%; width: 40vw; height: 40vw; background: #c084fc; border-radius: 50%; }
-    .blob-2 { bottom: -10%; right: -10%; width: 50vw; height: 50vw; background: #3b82f6; border-radius: 50%; animation-delay: -5s; }
-
-    @keyframes float {
-      0% { transform: translateY(0) scale(1); }
-      100% { transform: translateY(20px) scale(1.05); }
-    }
+    .blob { display: none; }
 
     .glass-panel {
-      position: relative;
-      z-index: 10;
-      background: var(--glass-bg);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid var(--glass-border);
-      border-radius: 24px;
-      padding: 40px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 32px;
       width: 100%;
       max-width: 850px;
-      box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.7);
-      animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-    }
-
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(40px); }
-      to { opacity: 1; transform: translateY(0); }
     }
 
     h1 {
-      font-size: 28px;
-      font-weight: 700;
+      font-size: 24px;
+      font-weight: 600;
       text-align: center;
       margin-bottom: 8px;
-      background: linear-gradient(to right, #e879f9, #38bdf8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--text-main);
     }
 
     p.subtitle {
@@ -85,14 +61,14 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .input-group {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       position: relative;
     }
 
     .input-group label {
       display: block;
       margin-bottom: 8px;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       color: var(--text-muted);
       text-transform: uppercase;
@@ -101,23 +77,22 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     input[type="password"], input[type="text"] {
       width: 100%;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 12px;
-      padding: 14px 16px;
-      color: white;
-      font-size: 16px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px 14px;
+      color: var(--text-main);
+      font-size: 15px;
       outline: none;
-      transition: all 0.2s;
+      transition: border-color 0.15s;
     }
 
     input[type="password"]:focus, input[type="text"]:focus {
-      border-color: #c084fc;
-      box-shadow: 0 0 0 4px rgba(192, 132, 252, 0.1);
+      border-color: var(--accent);
     }
 
     .turnstile-wrapper {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       display: flex;
       justify-content: center;
       min-height: 65px;
@@ -125,54 +100,47 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     button {
       width: 100%;
-      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-      color: white;
+      background: var(--accent);
+      color: #fff;
       border: none;
-      border-radius: 12px;
-      padding: 16px;
-      font-size: 16px;
-      font-weight: 600;
+      border-radius: 4px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 500;
       cursor: pointer;
-      transition: all 0.2s;
-      box-shadow: 0 4px 12px rgba(107, 33, 168, 0.4);
+      transition: background-color 0.15s;
     }
 
     button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 16px rgba(107, 33, 168, 0.6);
-    }
-
-    button:active {
-      transform: translateY(0);
+      background: var(--accent-hover);
     }
 
     button:disabled {
-      opacity: 0.7;
+      opacity: 0.5;
       cursor: not-allowed;
-      transform: none;
     }
 
     .error-msg {
       color: var(--error);
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      font-size: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--error);
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
       text-align: center;
       display: none;
     }
 
     /* Repository Selection */
     .repo-select-group {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .repo-select-group label {
       display: block;
       margin-bottom: 8px;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       color: var(--text-muted);
       text-transform: uppercase;
@@ -181,38 +149,31 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     select {
       width: 100%;
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 12px;
-      padding: 16px 20px;
-      color: white;
-      font-size: 17px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px 14px;
+      color: var(--text-main);
+      font-size: 15px;
       font-weight: 500;
       outline: none;
       appearance: none;
       cursor: pointer;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2338bdf8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
       background-repeat: no-repeat;
-      background-position: right 20px center;
-      background-size: 18px;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      background-position: right 14px center;
+      background-size: 16px;
+      transition: border-color 0.15s;
     }
 
-    select:hover {
-      background-color: rgba(0, 0, 0, 0.6);
-      border-color: rgba(56, 189, 248, 0.4);
-    }
-
-    select:focus {
-      border-color: #38bdf8;
-      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    select:hover, select:focus {
+      border-color: var(--accent);
     }
 
     select option {
-      background-color: #1e293b;
-      color: white;
-      padding: 12px;
+      background-color: var(--surface);
+      color: var(--text-main);
+      padding: 10px;
     }
 
     .repo-info {
@@ -223,7 +184,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .repo-info span {
-      color: #c084fc;
+      color: var(--text-main);
       font-weight: 500;
     }
 
@@ -238,33 +199,30 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     .sync-tag {
       font-size: 10px;
       padding: 2px 8px;
-      border-radius: 4px;
-      background: rgba(99, 102, 241, 0.15);
-      color: #818cf8;
+      border-radius: 3px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
     }
 
     .sync-tag-exclude {
       font-size: 10px;
       padding: 2px 8px;
-      border-radius: 4px;
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
+      border-radius: 3px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--error);
       text-decoration: line-through;
     }
 
-    .button-group {
-      display: flex;
-      gap: 12px;
-      margin-top: 24px;
-    }
-
     .stats-card {
-      background: rgba(0,0,0,0.2);
-      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
       padding: 16px;
       display: flex;
       justify-content: space-between;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .stat-item {
@@ -272,9 +230,9 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .stat-val {
-      font-size: 24px;
-      font-weight: 700;
-      color: #38bdf8;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-main);
     }
 
     .stat-label {
@@ -285,20 +243,21 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .progress-container {
       display: none;
-      margin-top: 24px;
+      margin-top: 20px;
     }
 
     .progress-bar-bg {
-      background: rgba(255,255,255,0.1);
-      height: 8px;
-      border-radius: 4px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      height: 6px;
+      border-radius: 3px;
       overflow: hidden;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .progress-bar-fill {
       height: 100%;
-      background: linear-gradient(90deg, #38bdf8, #c084fc);
+      background: var(--accent);
       width: 0%;
       transition: width 0.3s ease;
     }
@@ -310,15 +269,15 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .log-window {
-      margin-top: 20px;
-      background: #000;
-      border: 1px solid var(--glass-border);
-      border-radius: 8px;
+      margin-top: 16px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
       height: 120px;
-      padding: 12px;
+      padding: 10px;
       font-family: monospace;
       font-size: 12px;
-      color: #a7f3d0;
+      color: var(--text-main);
       overflow-y: auto;
       display: none;
     }
@@ -328,33 +287,32 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .diff-list {
-      margin-top: 24px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--glass-border);
-      border-radius: 12px;
+      margin-top: 20px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
       max-height: 300px;
       overflow-y: auto;
       display: none;
     }
 
     .diff-header {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--glass-border);
-      font-size: 14px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
       font-weight: 600;
-      color: #38bdf8;
+      color: var(--text-main);
       display: flex;
       justify-content: space-between;
       align-items: center;
       position: sticky;
       top: 0;
-      background: rgba(15, 23, 42, 0.9);
-      backdrop-filter: blur(8px);
+      background: var(--surface-2);
     }
 
     .diff-item {
-      padding: 10px 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
       font-size: 13px;
       display: flex;
       align-items: center;
@@ -368,14 +326,14 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     .diff-type {
       font-size: 10px;
       padding: 2px 6px;
-      border-radius: 4px;
+      border-radius: 3px;
       text-transform: uppercase;
-      font-weight: 700;
+      font-weight: 600;
       flex-shrink: 0;
     }
 
-    .type-upload { background: rgba(16, 185, 129, 0.2); color: #10b981; }
-    .type-delete { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+    .type-upload { background: var(--surface); border: 1px solid var(--success); color: var(--success); }
+    .type-delete { background: var(--surface); border: 1px solid var(--error); color: var(--error); }
 
     .diff-path {
       word-break: break-all;
@@ -385,15 +343,15 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     .button-group {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 10px;
       margin-top: 12px;
     }
 
     /* Rollback styles */
     .section-divider {
       border: none;
-      border-top: 1px solid var(--glass-border);
-      margin: 28px 0 20px;
+      border-top: 1px solid var(--border);
+      margin: 24px 0 16px;
     }
 
     .rollback-section {
@@ -401,10 +359,10 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .rollback-section h2 {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 600;
       margin-bottom: 4px;
-      color: #f59e0b;
+      color: var(--warning);
     }
 
     .rollback-section .subtitle {
@@ -414,19 +372,19 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .commit-list {
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--glass-border);
-      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
       max-height: 280px;
       overflow-y: auto;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
     }
 
     .commit-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
       cursor: pointer;
-      transition: background 0.15s;
+      transition: background-color 0.15s;
       display: flex;
       align-items: flex-start;
       gap: 12px;
@@ -434,24 +392,24 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .commit-item:last-child { border-bottom: none; }
 
-    .commit-item:hover { background: rgba(255, 255, 255, 0.05); }
+    .commit-item:hover { background: var(--surface); }
 
     .commit-item.selected {
-      background: rgba(245, 158, 11, 0.1);
-      border-left: 3px solid #f59e0b;
+      background: var(--surface);
+      border-left: 3px solid var(--warning);
     }
 
     .commit-radio {
       margin-top: 3px;
-      accent-color: #f59e0b;
+      accent-color: var(--warning);
       flex-shrink: 0;
     }
 
-    .commit-info { 
-      flex: 1; 
-      min-width: 0; 
+    .commit-info {
+      flex: 1;
+      min-width: 0;
       overflow-x: auto;
-      scrollbar-width: none; /* Hide scrollbar for cleaner look, but still scrollable */
+      scrollbar-width: none;
       -ms-overflow-style: none;
     }
 
@@ -473,57 +431,61 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .commit-sha {
       font-family: monospace;
-      color: #f59e0b;
+      color: var(--warning);
       font-size: 11px;
     }
 
     .load-more-btn {
       width: 100%;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid var(--glass-border);
-      box-shadow: none;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text-main);
       padding: 10px;
       font-size: 13px;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
+    }
+
+    .load-more-btn:hover {
+      background: var(--surface);
     }
 
     .rollback-btn {
-      background: linear-gradient(135deg, #b45309, #f59e0b) !important;
-      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4) !important;
+      background: var(--warning) !important;
+      color: #0f172a !important;
     }
 
     .rollback-btn:hover {
-      box-shadow: 0 6px 16px rgba(245, 158, 11, 0.6) !important;
+      background: #d97706 !important;
     }
 
     .rollback-warning {
       font-size: 11px;
-      color: #f59e0b;
+      color: var(--warning);
       text-align: center;
       margin-top: 8px;
     }
 
     .ai-summary-box {
       margin-top: 16px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(192, 132, 252, 0.3);
-      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
       display: none;
     }
 
     .ai-summary-header {
-      padding: 12px 16px;
-      border-bottom: 1px solid rgba(192, 132, 252, 0.2);
-      font-size: 14px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
       font-weight: 600;
-      color: #c084fc;
+      color: var(--text-main);
       display: flex;
       align-items: center;
       gap: 8px;
     }
 
     .ai-summary-content {
-      padding: 12px 16px;
+      padding: 12px 14px;
       font-size: 13px;
       color: var(--text-main);
       line-height: 1.7;
@@ -532,7 +494,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     .ai-summary-content h1, .ai-summary-content h2, .ai-summary-content h3 {
       margin: 12px 0 6px;
       font-size: 14px;
-      color: #c084fc;
+      color: var(--text-main);
     }
 
     .ai-summary-content p { margin-bottom: 8px; }
@@ -542,14 +504,15 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .ai-summary-content code {
-      background: rgba(0,0,0,0.3);
-      border-radius: 4px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
       padding: 1px 5px;
       font-family: monospace;
       font-size: 12px;
     }
 
-    .ai-summary-content strong { color: #e2e8f0; }
+    .ai-summary-content strong { color: var(--text-main); }
 
     .ai-checkbox-row {
       display: flex;
@@ -563,7 +526,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       background: none;
       border: none;
       padding: 0;
-      accent-color: #c084fc;
+      accent-color: var(--accent);
       cursor: pointer;
     }
 
@@ -576,18 +539,18 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .diff-text-box {
       margin-top: 16px;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
       display: none;
     }
 
     .diff-text-header {
-      padding: 10px 16px;
-      border-bottom: 1px solid rgba(56, 189, 248, 0.2);
-      font-size: 14px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
       font-weight: 600;
-      color: #38bdf8;
+      color: var(--text-main);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -595,10 +558,10 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
     }
 
     .diff-text-content {
-      padding: 12px 16px;
+      padding: 12px 14px;
       font-family: monospace;
       font-size: 11px;
-      color: #a7f3d0;
+      color: var(--text-main);
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-all;
@@ -608,33 +571,50 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
 
     .copy-btn {
       width: auto;
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 8px;
-      padding: 4px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 4px 10px;
       font-size: 12px;
-      font-weight: 600;
-      color: #38bdf8;
+      font-weight: 500;
+      color: var(--text-main);
       cursor: pointer;
-      box-shadow: none;
-      transition: all 0.2s;
     }
 
     .copy-btn:hover {
-      background: rgba(56, 189, 248, 0.25);
-      transform: none;
-      box-shadow: none;
+      background: var(--bg);
     }
 
-    .copy-btn:active { transform: none; }
+    .btn-secondary {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: var(--surface);
+    }
+
+    .btn-info {
+      background: var(--surface-2);
+      border: 1px solid var(--info);
+      color: var(--info);
+    }
+
+    .btn-info:hover {
+      background: var(--surface);
+    }
+
+    .mt-12 { margin-top: 12px; }
 
     .private-badge {
       display: inline-block;
       font-size: 9px;
       padding: 1px 6px;
-      border-radius: 4px;
-      background: rgba(245, 158, 11, 0.15);
-      color: #f59e0b;
+      border-radius: 3px;
+      background: var(--surface);
+      border: 1px solid var(--warning);
+      color: var(--warning);
       font-weight: 600;
       text-transform: uppercase;
       margin-left: 4px;
@@ -644,8 +624,6 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-  <div class="blob blob-1"></div>
-  <div class="blob blob-2"></div>
   <div class="glass-panel">
     ${body}
   </div>
@@ -756,11 +734,13 @@ export const dashboardPage = () => layout('Dashboard', `
   </div>
 
   <div class="button-group">
-    <button id="checkBtn" onclick="checkDiffs()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); box-shadow: none;">변경사항 확인</button>
+    <button id="checkBtn" class="btn-secondary" onclick="checkDiffs()">변경사항 확인</button>
     <button id="syncBtn" onclick="startSync()">동기화</button>
   </div>
 
-  <button id="logoutBtn" onclick="logout()" style="margin-top:12px; background: rgba(255,255,255,0.1); box-shadow:none;">로그아웃</button>
+  <button id="treeBtn" class="btn-info mt-12" onclick="extractTree()">비공개 레포 디렉토리 구조 추출</button>
+
+  <button id="logoutBtn" class="btn-secondary mt-12" onclick="logout()">로그아웃</button>
 
   <div class="diff-list" id="diffList">
     <div class="diff-header">
@@ -781,6 +761,14 @@ export const dashboardPage = () => layout('Dashboard', `
       <button class="copy-btn" onclick="copyDiffText()">클립보드 복사</button>
     </div>
     <div class="diff-text-content" id="diffTextContent"></div>
+  </div>
+
+  <div class="diff-text-box" id="treeBox">
+    <div class="diff-text-header">
+      <span id="treeBoxTitle">⟩_ 디렉토리 구조</span>
+      <button class="copy-btn" onclick="copyTreeText()">클립보드 복사</button>
+    </div>
+    <div class="diff-text-content" id="treeContent"></div>
   </div>
 
   <div class="progress-container" id="progressContainer">
@@ -875,6 +863,8 @@ export const dashboardPage = () => layout('Dashboard', `
     document.getElementById('aiSummaryContent').textContent = '';
     document.getElementById('diffTextBox').style.display = 'none';
     document.getElementById('diffTextContent').textContent = '';
+    document.getElementById('treeBox').style.display = 'none';
+    document.getElementById('treeContent').textContent = '';
   }
 
   function log(msg) {
@@ -1047,6 +1037,49 @@ export const dashboardPage = () => layout('Dashboard', `
     } finally {
       btn.disabled = false;
       btn.textContent = '변경사항 확인';
+    }
+  }
+
+  async function extractTree() {
+    const btn = document.getElementById('treeBtn');
+    const box = document.getElementById('treeBox');
+    const content = document.getElementById('treeContent');
+    const title = document.getElementById('treeBoxTitle');
+
+    btn.disabled = true;
+    btn.textContent = '추출 중...';
+    box.style.display = 'block';
+    content.textContent = '디렉토리 구조 추출 중...';
+    title.textContent = '⟩_ 디렉토리 구조';
+
+    try {
+      const res = await fetch('/api/sync/tree', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoIndex: currentRepoIndex })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      content.textContent = data.tree || '(비어있음)';
+      title.textContent = '⟩_ ' + data.repo + ' (' + data.fileCount + '개 파일, ' + data.dirCount + '개 디렉토리, ' + data.branch + ')';
+    } catch (e) {
+      content.textContent = '디렉토리 구조 추출 실패: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '비공개 레포 디렉토리 구조 추출';
+    }
+  }
+
+  async function copyTreeText() {
+    const text = document.getElementById('treeContent').textContent;
+    const btn = document.querySelector('#treeBox .copy-btn');
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = '복사됨!';
+      setTimeout(() => { btn.textContent = '클립보드 복사'; }, 2000);
+    } catch {
+      btn.textContent = '복사 실패';
+      setTimeout(() => { btn.textContent = '클립보드 복사'; }, 2000);
     }
   }
 

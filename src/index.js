@@ -537,6 +537,75 @@ app.post('/api/sync/diff-info', async (c) => {
     }
 });
 
+// Directory Tree Extraction //
+
+function buildTreeText(items) {
+    const root = Object.create(null);
+    for (const item of items) {
+        const parts = item.path.split('/');
+        let node = root;
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            const isLast = i === parts.length - 1;
+            if (!node[part]) {
+                node[part] = { type: isLast ? item.type : 'tree', children: Object.create(null) };
+            } else if (isLast) {
+                node[part].type = item.type;
+            }
+            node = node[part].children;
+        }
+    }
+
+    const lines = [];
+    const walk = (node, prefix) => {
+        const keys = Object.keys(node).sort((a, b) => {
+            const aIsDir = node[a].type === 'tree';
+            const bIsDir = node[b].type === 'tree';
+            if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+            return a.localeCompare(b);
+        });
+        keys.forEach((key, idx) => {
+            const isLast = idx === keys.length - 1;
+            const branch = isLast ? '└── ' : '├── ';
+            const isDir = node[key].type === 'tree';
+            lines.push(prefix + branch + key + (isDir ? '/' : ''));
+            walk(node[key].children, prefix + (isLast ? '    ' : '│   '));
+        });
+    };
+    walk(root, '');
+    return lines.join('\n');
+}
+
+app.post('/api/sync/tree', async (c) => {
+    try {
+        const body = await c.req.json().catch(() => ({}));
+        const repoIndex = body.repoIndex ?? 0;
+        const config = getRepoConfig(c.env, repoIndex);
+        const gh = new Github(c.env);
+
+        const repoInfo = await gh.getRepoInfo(config.privateRepo);
+        const branch = repoInfo.default_branch || 'main';
+
+        const commitSha = await gh.getLatestCommitSha(config.privateRepo, branch);
+        const treeSha = await gh.getCommitTreeSha(config.privateRepo, commitSha);
+        const tree = await gh.getTreeRecursive(config.privateRepo, treeSha);
+
+        const fileCount = tree.filter(t => t.type === 'blob').length;
+        const dirCount = tree.filter(t => t.type === 'tree').length;
+        const treeText = `${config.privateRepo}/\n${buildTreeText(tree)}`;
+
+        return c.json({
+            repo: config.privateRepo,
+            branch,
+            fileCount,
+            dirCount,
+            tree: treeText
+        });
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
 // Rollback Endpoints //
 
 // Commit rolled-back state to private repository
