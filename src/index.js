@@ -459,6 +459,12 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
 
 // Consolidated Diff & Summary Endpoint //
 
+const AI_FALLBACK_CHAIN = [
+    { provider: 'gemini', model: 'gemini-3.5-flash' },
+    { provider: 'gemini', model: 'gemini-3.1-flash-lite-preview' },
+    { provider: 'workers-ai', model: '@cf/google/gemma-4-26b-a4b-it' }
+];
+
 app.post('/api/sync/diff-info', async (c) => {
     try {
         const body = await c.req.json().catch(() => ({}));
@@ -471,9 +477,11 @@ app.post('/api/sync/diff-info', async (c) => {
         let diffContent = null;
         let summary = null;
         let summaryError = null;
+        let summaryFallbacks = [];
         let diffText = null;
         let commitMessage = null;
         let commitMessageError = null;
+        let commitMsgFallbacks = [];
 
         if (wantAI || wantDiff || wantCommitMsg) {
             diffContent = await buildDiffContent(gh, config, toUpload);
@@ -485,17 +493,56 @@ app.post('/api/sync/diff-info', async (c) => {
         ].join('\n');
 
         const apiKey = c.env.GEMINI_API_KEY;
-        const model = c.env.GEMINI_MODEL || 'gemini-3-flash-preview';
-        const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+        const gemini = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-        const callGemini = async (prompt, budget = 1024) => {
-            if (!ai) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
-            const response = await ai.models.generateContent({
-                model,
+        const callOne = async (modelInfo, prompt, budget) => {
+            if (modelInfo.provider === 'workers-ai') {
+                if (!c.env.AI) throw new Error('Workers AI 바인딩이 설정되지 않았습니다.');
+                const response = await c.env.AI.run(modelInfo.model, {
+                    messages: [{ role: 'user', content: prompt }]
+                });
+                const text = response.response
+                    ?? response.result?.response
+                    ?? response.choices?.[0]?.message?.content
+                    ?? response.result?.choices?.[0]?.message?.content
+                    ?? '';
+                return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            }
+            if (!gemini) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
+            const response = await gemini.models.generateContent({
+                model: modelInfo.model,
                 contents: prompt,
                 config: { thinkingConfig: { thinkingBudget: budget } }
             });
             return response.text;
+        };
+
+        const callAI = async (prompt, budget = 1024) => {
+            const errors = [];
+            const fallbacks = [];
+            for (let i = 0; i < AI_FALLBACK_CHAIN.length; i++) {
+                const modelInfo = AI_FALLBACK_CHAIN[i];
+                console.log(`[AI] 시도 ${i + 1}/${AI_FALLBACK_CHAIN.length}: ${modelInfo.model}`);
+                const hasNext = i + 1 < AI_FALLBACK_CHAIN.length;
+                try {
+                    const text = await callOne(modelInfo, prompt, budget);
+                    if (text && text.trim()) {
+                        console.log(`[AI] 성공: ${modelInfo.model}`);
+                        return { text, fallbacks };
+                    }
+                    const reason = '빈 응답';
+                    console.warn(`[AI] 빈 응답: ${modelInfo.model}${hasNext ? ' → 다음 모델로 전환' : ''}`);
+                    errors.push(`${modelInfo.model}: ${reason}`);
+                    if (hasNext) fallbacks.push({ model: modelInfo.model, reason, next: AI_FALLBACK_CHAIN[i + 1].model });
+                } catch (err) {
+                    const reason = err.message;
+                    console.warn(`[AI] 실패: ${modelInfo.model} — ${reason}${hasNext ? ' → 다음 모델로 전환' : ''}`);
+                    errors.push(`${modelInfo.model}: ${reason}`);
+                    if (hasNext) fallbacks.push({ model: modelInfo.model, reason, next: AI_FALLBACK_CHAIN[i + 1].model });
+                }
+            }
+            console.error(`[AI] 모든 모델 실패 — ${errors.join(' | ')}`);
+            throw new Error(`모든 모델 실패 — ${errors.join(' | ')}`);
         };
 
         const tasks = [];
@@ -503,8 +550,8 @@ app.post('/api/sync/diff-info', async (c) => {
         if (wantAI) {
             const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 한국어로 간결하게 요약해주세요. 어떤 파일들이 추가/수정/삭제되었는지, 그리고 전체적인 변경의 의미와 주요 내용 변화를 설명해주세요.`;
             tasks.push(
-                callGemini(prompt, 1024)
-                    .then(text => { summary = text; })
+                callAI(prompt, 1024)
+                    .then(({ text, fallbacks }) => { summary = text; summaryFallbacks = fallbacks; })
                     .catch(err => { summaryError = err.message; })
             );
         }
@@ -512,9 +559,10 @@ app.post('/api/sync/diff-info', async (c) => {
         if (wantCommitMsg) {
             const prompt = `다음은 Git 저장소 동기화에서 발생한 변경사항입니다.\n\n[변경 파일 목록]\n${diffLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 한 줄짜리 간결한 Git 커밋 메시지로 한국어로 작성해주세요. 요구사항:\n- 한 줄로만 작성 (50자 이내 권장)\n- 마침표, 따옴표, 설명, 머릿말 없이 커밋 메시지 본문만 출력\n- 동사형 서술(예: "로그인 폼 검증 로직 추가", "라우터 초기화 버그 수정")`;
             tasks.push(
-                callGemini(prompt, 512)
-                    .then(text => {
+                callAI(prompt, 512)
+                    .then(({ text, fallbacks }) => {
                         commitMessage = (text || '').trim().split('\n')[0].trim().replace(/^["'`]+|["'`]+$/g, '');
+                        commitMsgFallbacks = fallbacks;
                     })
                     .catch(err => { commitMessageError = err.message; })
             );
@@ -531,7 +579,7 @@ app.post('/api/sync/diff-info', async (c) => {
             diffText = `[변경 파일 목록]\n${header}${deletedSection}\n\n[파일 내용]\n${diffContent || '(변경사항 없음)'}`;
         }
 
-        return c.json({ summary, summaryError, diff: diffText, commitMessage, commitMessageError });
+        return c.json({ summary, summaryError, summaryFallbacks, diff: diffText, commitMessage, commitMessageError, commitMsgFallbacks });
     } catch (err) {
         return c.text(err.message, 500);
     }
@@ -539,7 +587,13 @@ app.post('/api/sync/diff-info', async (c) => {
 
 // Directory Tree Extraction //
 
-function buildTreeText(items) {
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+function buildTreeText(items, fileDetails) {
     const root = Object.create(null);
     for (const item of items) {
         const parts = item.path.split('/');
@@ -548,9 +602,10 @@ function buildTreeText(items) {
             const part = parts[i];
             const isLast = i === parts.length - 1;
             if (!node[part]) {
-                node[part] = { type: isLast ? item.type : 'tree', children: Object.create(null) };
+                node[part] = { type: isLast ? item.type : 'tree', path: item.path, children: Object.create(null) };
             } else if (isLast) {
                 node[part].type = item.type;
+                node[part].path = item.path;
             }
             node = node[part].children;
         }
@@ -568,7 +623,14 @@ function buildTreeText(items) {
             const isLast = idx === keys.length - 1;
             const branch = isLast ? '└── ' : '├── ';
             const isDir = node[key].type === 'tree';
-            lines.push(prefix + branch + key + (isDir ? '/' : ''));
+            let label = key + (isDir ? '/' : '');
+            if (!isDir && fileDetails) {
+                const detail = fileDetails.get(node[key].path);
+                if (detail) {
+                    label += ` (${detail.size})`;
+                }
+            }
+            lines.push(prefix + branch + label);
             walk(node[key].children, prefix + (isLast ? '    ' : '│   '));
         });
     };
@@ -580,6 +642,7 @@ app.post('/api/sync/tree', async (c) => {
     try {
         const body = await c.req.json().catch(() => ({}));
         const repoIndex = body.repoIndex ?? 0;
+        const showDetails = body.showDetails ?? false;
         const config = getRepoConfig(c.env, repoIndex);
         const gh = new Github(c.env);
 
@@ -590,16 +653,27 @@ app.post('/api/sync/tree', async (c) => {
         const treeSha = await gh.getCommitTreeSha(config.privateRepo, commitSha);
         const tree = await gh.getTreeRecursive(config.privateRepo, treeSha);
 
-        const fileCount = tree.filter(t => t.type === 'blob').length;
+        const blobs = tree.filter(t => t.type === 'blob');
+        const fileCount = blobs.length;
         const dirCount = tree.filter(t => t.type === 'tree').length;
-        const treeText = `${config.privateRepo}/\n${buildTreeText(tree)}`;
+
+        let fileDetails = null;
+        let totalSize = null;
+
+        if (showDetails) {
+            fileDetails = new Map(blobs.map(f => [f.path, { size: formatBytes(f.size ?? 0) }]));
+            totalSize = formatBytes(blobs.reduce((sum, f) => sum + (f.size ?? 0), 0));
+        }
+
+        const treeText = `${config.privateRepo}/\n${buildTreeText(tree, fileDetails)}`;
 
         return c.json({
             repo: config.privateRepo,
             branch,
             fileCount,
             dirCount,
-            tree: treeText
+            tree: treeText,
+            totalSize
         });
     } catch (err) {
         return c.text(err.message, 500);

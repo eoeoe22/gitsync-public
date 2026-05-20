@@ -622,6 +622,7 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
   </style>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body>
   <div class="glass-panel">
@@ -721,12 +722,12 @@ export const dashboardPage = () => layout('Dashboard', `
   </div>
 
   <div class="ai-checkbox-row">
-    <input type="checkbox" id="aiSummaryCheck" checked>
-    <label for="aiSummaryCheck">Gemini AI 요약</label>
+    <input type="checkbox" id="aiSummaryCheck">
+    <label for="aiSummaryCheck">AI 요약</label>
   </div>
   <div class="ai-checkbox-row">
     <input type="checkbox" id="aiCommitMsgCheck" checked>
-    <label for="aiCommitMsgCheck">Gemini AI 커밋 메시지 자동 생성</label>
+    <label for="aiCommitMsgCheck">AI 커밋 메시지 자동 생성</label>
   </div>
   <div class="ai-checkbox-row">
     <input type="checkbox" id="diffTextCheck" checked>
@@ -738,7 +739,11 @@ export const dashboardPage = () => layout('Dashboard', `
     <button id="syncBtn" onclick="startSync()">동기화</button>
   </div>
 
-  <button id="treeBtn" class="btn-info mt-12" onclick="extractTree()">비공개 레포 디렉토리 구조 추출</button>
+  <div class="ai-checkbox-row">
+    <input type="checkbox" id="detailCheck">
+    <label for="detailCheck">세부정보 표시</label>
+  </div>
+  <button id="treeBtn" class="btn-info" onclick="extractTree()">비공개 레포 디렉토리 구조 추출</button>
 
   <button id="logoutBtn" class="btn-secondary mt-12" onclick="logout()">로그아웃</button>
 
@@ -997,7 +1002,7 @@ export const dashboardPage = () => layout('Dashboard', `
           if (wantAI || wantCommitMsg) {
             tasks.push(
               postDiffInfo({ wantAI, wantCommitMsg })
-                .then(({ summary, summaryError, commitMessage, commitMessageError }) => {
+                .then(({ summary, summaryError, summaryFallbacks, commitMessage, commitMessageError, commitMsgFallbacks }) => {
                   if (wantAI) {
                     if (summaryError) {
                       summaryContent.textContent = 'AI 요약 실패: ' + summaryError;
@@ -1017,6 +1022,27 @@ export const dashboardPage = () => layout('Dashboard', `
                       }
                     }
                   }
+                  const allFallbacks = [...(summaryFallbacks || []), ...(commitMsgFallbacks || [])];
+                  const seen = new Set();
+                  const uniqueFallbacks = allFallbacks.filter(fb => {
+                    const key = fb.model + '→' + fb.next;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  });
+                  uniqueFallbacks.forEach((fb, idx) => {
+                    setTimeout(() => {
+                      Swal.fire({
+                        toast: true,
+                        position: 'top-end',
+                        icon: 'warning',
+                        title: fb.model + ' 실패 → ' + fb.next + ' 로 전환',
+                        showConfirmButton: false,
+                        timer: 4000,
+                        timerProgressBar: true
+                      });
+                    }, idx * 600);
+                  });
                 })
                 .catch(err => {
                   if (wantAI) summaryContent.textContent = 'AI 요약 실패: ' + err.message;
@@ -1045,6 +1071,7 @@ export const dashboardPage = () => layout('Dashboard', `
     const box = document.getElementById('treeBox');
     const content = document.getElementById('treeContent');
     const title = document.getElementById('treeBoxTitle');
+    const showDetails = document.getElementById('detailCheck').checked;
 
     btn.disabled = true;
     btn.textContent = '추출 중...';
@@ -1056,12 +1083,16 @@ export const dashboardPage = () => layout('Dashboard', `
       const res = await fetch('/api/sync/tree', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoIndex: currentRepoIndex })
+        body: JSON.stringify({ repoIndex: currentRepoIndex, showDetails })
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       content.textContent = data.tree || '(비어있음)';
-      title.textContent = '⟩_ ' + data.repo + ' (' + data.fileCount + '개 파일, ' + data.dirCount + '개 디렉토리, ' + data.branch + ')';
+      let meta = data.fileCount + '개 파일, ' + data.dirCount + '개 디렉토리, ' + data.branch;
+      if (showDetails && data.totalSize != null) {
+        meta += ', ' + data.totalSize;
+      }
+      title.textContent = '⟩_ ' + data.repo + ' (' + meta + ')';
     } catch (e) {
       content.textContent = '디렉토리 구조 추출 실패: ' + e.message;
     } finally {
