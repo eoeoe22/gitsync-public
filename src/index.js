@@ -665,7 +665,10 @@ app.post('/api/sync/tree', async (c) => {
             totalSize = formatBytes(blobs.reduce((sum, f) => sum + (f.size ?? 0), 0));
         }
 
-        const treeText = `${config.privateRepo}/\n${buildTreeText(tree, fileDetails)}`;
+        const firstLine = showDetails && totalSize
+            ? `${config.privateRepo} (${totalSize})`
+            : `${config.privateRepo}/`;
+        const treeText = `${firstLine}\n${buildTreeText(tree, fileDetails)}`;
 
         return c.json({
             repo: config.privateRepo,
