@@ -619,6 +619,41 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       text-transform: uppercase;
       margin-left: 4px;
     }
+
+    .tab-bar {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      width: auto;
+      flex: 1;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn:hover {
+      background: none;
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
   </style>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -694,108 +729,125 @@ export const dashboardPage = () => layout('Dashboard', `
   <h1>GitSync</h1>
   <p class="subtitle">멀티 저장소 동기화 관리자</p>
 
-  <div class="repo-select-group">
-    <label for="repoSelect">작업 저장소 선택</label>
-    <select id="repoSelect" onchange="selectRepo(this.value)"></select>
+  <div class="tab-bar">
+    <button type="button" class="tab-btn active" id="tabBtn-sync" onclick="switchTab('sync')">동기화</button>
+    <button type="button" class="tab-btn" id="tabBtn-extract" onclick="switchTab('extract')">디렉토리 추출</button>
   </div>
 
-  <div class="repo-info" id="repoInfo"></div>
-
-  <div class="stats-card">
-    <div class="stat-item">
-      <div class="stat-val" id="uploadStat">-</div>
-      <div class="stat-label">업로드</div>
+  <div class="tab-panel active" id="tabPanel-sync">
+    <div class="repo-select-group">
+      <label for="repoSelect">작업 저장소 선택</label>
+      <select id="repoSelect" onchange="selectRepo(this.value)"></select>
     </div>
-    <div class="stat-item">
-      <div class="stat-val" id="deleteStat">-</div>
-      <div class="stat-label">삭제</div>
+
+    <div class="repo-info" id="repoInfo"></div>
+
+    <div class="stats-card">
+      <div class="stat-item">
+        <div class="stat-val" id="uploadStat">-</div>
+        <div class="stat-label">업로드</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="deleteStat">-</div>
+        <div class="stat-label">삭제</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="statusStat">준비</div>
+        <div class="stat-label">상태</div>
+      </div>
     </div>
-    <div class="stat-item">
-      <div class="stat-val" id="statusStat">준비</div>
-      <div class="stat-label">상태</div>
+
+    <div class="input-group">
+      <label for="commitMessage">커밋 메시지</label>
+      <input type="text" id="commitMessage" placeholder="커밋 메시지 작성 (선택사항)">
+    </div>
+
+    <div class="ai-checkbox-row">
+      <input type="checkbox" id="aiSummaryCheck">
+      <label for="aiSummaryCheck">AI 요약</label>
+    </div>
+    <div class="ai-checkbox-row">
+      <input type="checkbox" id="aiCommitMsgCheck" checked>
+      <label for="aiCommitMsgCheck">AI 커밋 메시지 자동 생성</label>
+    </div>
+    <div class="ai-checkbox-row">
+      <input type="checkbox" id="diffTextCheck" checked>
+      <label for="diffTextCheck">Diff 텍스트 표시</label>
+    </div>
+
+    <div class="button-group">
+      <button id="checkBtn" class="btn-secondary" onclick="checkDiffs()">변경사항 확인</button>
+      <button id="syncBtn" onclick="startSync()">동기화</button>
+    </div>
+
+    <div class="diff-list" id="diffList">
+      <div class="diff-header">
+        <span>변경된 파일</span>
+        <span id="diffCount" style="font-size: 12px; color: var(--text-muted);">0개 파일</span>
+      </div>
+      <div id="diffItems"></div>
+    </div>
+
+    <div class="ai-summary-box" id="aiSummaryBox">
+      <div class="ai-summary-header">✦ AI 변경사항 요약</div>
+      <div class="ai-summary-content" id="aiSummaryContent"></div>
+    </div>
+
+    <div class="diff-text-box" id="diffTextBox">
+      <div class="diff-text-header">
+        <span>⟩_ Diff 텍스트</span>
+        <button class="copy-btn" onclick="copyDiffText()">클립보드 복사</button>
+      </div>
+      <div class="diff-text-content" id="diffTextContent"></div>
+    </div>
+
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progressBar"></div>
+      </div>
+      <div class="progress-text" id="progressText">변경사항 분석 중...</div>
+    </div>
+
+    <div class="log-window" id="logWindow"></div>
+
+    <div class="rollback-section" id="rollbackSection">
+      <hr class="section-divider">
+      <h2>버전 롤백 <span class="private-badge">비공개 전용</span></h2>
+      <p class="subtitle">롤백할 커밋을 선택하세요.</p>
+
+      <div class="commit-list" id="commitList"></div>
+      <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreCommits()" style="display:none;">더 보기</button>
+
+      <button class="rollback-btn" id="rollbackBtn" onclick="startRollback()" disabled>선택한 버전으로 롤백</button>
+      <div class="rollback-warning">비공개 저장소가 선택한 버전으로 덮어씌워집니다. 공개 저장소는 동기화를 실행하기 전까지 변경되지 않습니다.</div>
     </div>
   </div>
 
-  <div class="input-group">
-    <label for="commitMessage">커밋 메시지</label>
-    <input type="text" id="commitMessage" placeholder="커밋 메시지 작성 (선택사항)">
-  </div>
+  <div class="tab-panel" id="tabPanel-extract">
+    <div class="repo-select-group">
+      <label for="extractRepoSelect">레포지토리 선택</label>
+      <select id="extractRepoSelect"></select>
+    </div>
 
-  <div class="ai-checkbox-row">
-    <input type="checkbox" id="aiSummaryCheck">
-    <label for="aiSummaryCheck">AI 요약</label>
-  </div>
-  <div class="ai-checkbox-row">
-    <input type="checkbox" id="aiCommitMsgCheck" checked>
-    <label for="aiCommitMsgCheck">AI 커밋 메시지 자동 생성</label>
-  </div>
-  <div class="ai-checkbox-row">
-    <input type="checkbox" id="diffTextCheck" checked>
-    <label for="diffTextCheck">Diff 텍스트 표시</label>
-  </div>
+    <p class="repo-info">기존 동기화 설정과 무관하게 계정이 소유한 모든 레포지토리의 디렉토리 구조를 추출합니다.</p>
 
-  <div class="button-group">
-    <button id="checkBtn" class="btn-secondary" onclick="checkDiffs()">변경사항 확인</button>
-    <button id="syncBtn" onclick="startSync()">동기화</button>
-  </div>
+    <div class="ai-checkbox-row">
+      <input type="checkbox" id="detailCheck">
+      <label for="detailCheck">세부정보 표시</label>
+    </div>
 
-  <div class="ai-checkbox-row">
-    <input type="checkbox" id="detailCheck">
-    <label for="detailCheck">세부정보 표시</label>
+    <button id="treeBtn" class="btn-info" onclick="extractTree()">디렉토리 추출</button>
+
+    <div class="diff-text-box" id="treeBox">
+      <div class="diff-text-header">
+        <span id="treeBoxTitle">⟩_ 디렉토리 구조</span>
+        <button class="copy-btn" onclick="copyTreeText()">클립보드 복사</button>
+      </div>
+      <div class="diff-text-content" id="treeContent"></div>
+    </div>
   </div>
-  <button id="treeBtn" class="btn-info" onclick="extractTree()">비공개 레포 디렉토리 구조 추출</button>
 
   <button id="logoutBtn" class="btn-secondary mt-12" onclick="logout()">로그아웃</button>
-
-  <div class="diff-list" id="diffList">
-    <div class="diff-header">
-      <span>변경된 파일</span>
-      <span id="diffCount" style="font-size: 12px; color: var(--text-muted);">0개 파일</span>
-    </div>
-    <div id="diffItems"></div>
-  </div>
-
-  <div class="ai-summary-box" id="aiSummaryBox">
-    <div class="ai-summary-header">✦ AI 변경사항 요약</div>
-    <div class="ai-summary-content" id="aiSummaryContent"></div>
-  </div>
-
-  <div class="diff-text-box" id="diffTextBox">
-    <div class="diff-text-header">
-      <span>⟩_ Diff 텍스트</span>
-      <button class="copy-btn" onclick="copyDiffText()">클립보드 복사</button>
-    </div>
-    <div class="diff-text-content" id="diffTextContent"></div>
-  </div>
-
-  <div class="diff-text-box" id="treeBox">
-    <div class="diff-text-header">
-      <span id="treeBoxTitle">⟩_ 디렉토리 구조</span>
-      <button class="copy-btn" onclick="copyTreeText()">클립보드 복사</button>
-    </div>
-    <div class="diff-text-content" id="treeContent"></div>
-  </div>
-
-  <div class="progress-container" id="progressContainer">
-    <div class="progress-bar-bg">
-      <div class="progress-bar-fill" id="progressBar"></div>
-    </div>
-    <div class="progress-text" id="progressText">변경사항 분석 중...</div>
-  </div>
-
-  <div class="log-window" id="logWindow"></div>
-
-  <div class="rollback-section" id="rollbackSection">
-    <hr class="section-divider">
-    <h2>버전 롤백 <span class="private-badge">비공개 전용</span></h2>
-    <p class="subtitle">롤백할 커밋을 선택하세요.</p>
-
-    <div class="commit-list" id="commitList"></div>
-    <button class="load-more-btn" id="loadMoreBtn" onclick="loadMoreCommits()" style="display:none;">더 보기</button>
-
-    <button class="rollback-btn" id="rollbackBtn" onclick="startRollback()" disabled>선택한 버전으로 롤백</button>
-    <div class="rollback-warning">비공개 저장소가 선택한 버전으로 덮어씌워집니다. 공개 저장소는 동기화를 실행하기 전까지 변경되지 않습니다.</div>
-  </div>
 `, `
 <script>
   let repoConfigs = [];
@@ -803,6 +855,42 @@ export const dashboardPage = () => layout('Dashboard', `
   let rollbackPage = 1;
   let selectedCommitSha = null;
   let lastAutoCommitMsg = '';
+  let extractReposLoaded = false;
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tabBtn-' + tab).classList.add('active');
+    document.getElementById('tabPanel-' + tab).classList.add('active');
+    if (tab === 'extract' && !extractReposLoaded) {
+      loadExtractRepos();
+    }
+  }
+
+  async function loadExtractRepos() {
+    const select = document.getElementById('extractRepoSelect');
+    select.innerHTML = '<option value="">불러오는 중...</option>';
+    try {
+      const res = await fetch('/api/sync/repos-list');
+      if (!res.ok) throw new Error(await res.text());
+      const repos = await res.json();
+      extractReposLoaded = true;
+      select.innerHTML = '';
+      if (repos.length === 0) {
+        select.innerHTML = '<option value="">레포지토리가 없습니다</option>';
+        return;
+      }
+      repos.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.name;
+        opt.textContent = r.name + (r.private ? ' (비공개)' : '');
+        select.appendChild(opt);
+      });
+    } catch (e) {
+      select.innerHTML = '<option value="">불러오기 실패</option>';
+      alert('레포지토리 목록을 불러오지 못했습니다: ' + e.message);
+    }
+  }
 
   async function loadConfigs() {
     try {
@@ -868,8 +956,6 @@ export const dashboardPage = () => layout('Dashboard', `
     document.getElementById('aiSummaryContent').textContent = '';
     document.getElementById('diffTextBox').style.display = 'none';
     document.getElementById('diffTextContent').textContent = '';
-    document.getElementById('treeBox').style.display = 'none';
-    document.getElementById('treeContent').textContent = '';
   }
 
   function log(msg) {
@@ -1072,6 +1158,12 @@ export const dashboardPage = () => layout('Dashboard', `
     const content = document.getElementById('treeContent');
     const title = document.getElementById('treeBoxTitle');
     const showDetails = document.getElementById('detailCheck').checked;
+    const repo = document.getElementById('extractRepoSelect').value;
+
+    if (!repo) {
+      alert('레포지토리를 선택하세요.');
+      return;
+    }
 
     btn.disabled = true;
     btn.textContent = '추출 중...';
@@ -1080,10 +1172,10 @@ export const dashboardPage = () => layout('Dashboard', `
     title.textContent = '⟩_ 디렉토리 구조';
 
     try {
-      const res = await fetch('/api/sync/tree', {
+      const res = await fetch('/api/sync/extract-tree', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoIndex: currentRepoIndex, showDetails })
+        body: JSON.stringify({ repo, showDetails })
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -1097,7 +1189,7 @@ export const dashboardPage = () => layout('Dashboard', `
       content.textContent = '디렉토리 구조 추출 실패: ' + e.message;
     } finally {
       btn.disabled = false;
-      btn.textContent = '비공개 레포 디렉토리 구조 추출';
+      btn.textContent = '디렉토리 추출';
     }
   }
 

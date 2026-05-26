@@ -638,46 +638,59 @@ function buildTreeText(items, fileDetails) {
     return lines.join('\n');
 }
 
-app.post('/api/sync/tree', async (c) => {
+async function buildTreeResult(gh, repo, showDetails) {
+    const repoInfo = await gh.getRepoInfo(repo);
+    const branch = repoInfo.default_branch || 'main';
+
+    const commitSha = await gh.getLatestCommitSha(repo, branch);
+    const treeSha = await gh.getCommitTreeSha(repo, commitSha);
+    const tree = await gh.getTreeRecursive(repo, treeSha);
+
+    const blobs = tree.filter(t => t.type === 'blob');
+    const fileCount = blobs.length;
+    const dirCount = tree.filter(t => t.type === 'tree').length;
+
+    let fileDetails = null;
+    let totalSize = null;
+
+    if (showDetails) {
+        fileDetails = new Map(blobs.map(f => [f.path, { size: formatBytes(f.size ?? 0) }]));
+        totalSize = formatBytes(blobs.reduce((sum, f) => sum + (f.size ?? 0), 0));
+    }
+
+    const firstLine = showDetails && totalSize
+        ? `${repo} (${totalSize})`
+        : `${repo}/`;
+    const treeText = `${firstLine}\n${buildTreeText(tree, fileDetails)}`;
+
+    return { repo, branch, fileCount, dirCount, tree: treeText, totalSize };
+}
+
+// List all repositories owned by the configured GitHub account
+app.get('/api/sync/repos-list', async (c) => {
+    try {
+        const gh = new Github(c.env);
+        const repos = await gh.listAllRepos();
+        return c.json(repos.map(r => ({
+            name: r.name,
+            private: r.private,
+            defaultBranch: r.default_branch,
+            updatedAt: r.updated_at
+        })));
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
+// Extract directory tree for an arbitrary repository by name
+app.post('/api/sync/extract-tree', async (c) => {
     try {
         const body = await c.req.json().catch(() => ({}));
-        const repoIndex = body.repoIndex ?? 0;
+        const repo = body.repo;
         const showDetails = body.showDetails ?? false;
-        const config = getRepoConfig(c.env, repoIndex);
+        if (!repo) return c.text('repo is required', 400);
         const gh = new Github(c.env);
-
-        const repoInfo = await gh.getRepoInfo(config.privateRepo);
-        const branch = repoInfo.default_branch || 'main';
-
-        const commitSha = await gh.getLatestCommitSha(config.privateRepo, branch);
-        const treeSha = await gh.getCommitTreeSha(config.privateRepo, commitSha);
-        const tree = await gh.getTreeRecursive(config.privateRepo, treeSha);
-
-        const blobs = tree.filter(t => t.type === 'blob');
-        const fileCount = blobs.length;
-        const dirCount = tree.filter(t => t.type === 'tree').length;
-
-        let fileDetails = null;
-        let totalSize = null;
-
-        if (showDetails) {
-            fileDetails = new Map(blobs.map(f => [f.path, { size: formatBytes(f.size ?? 0) }]));
-            totalSize = formatBytes(blobs.reduce((sum, f) => sum + (f.size ?? 0), 0));
-        }
-
-        const firstLine = showDetails && totalSize
-            ? `${config.privateRepo} (${totalSize})`
-            : `${config.privateRepo}/`;
-        const treeText = `${firstLine}\n${buildTreeText(tree, fileDetails)}`;
-
-        return c.json({
-            repo: config.privateRepo,
-            branch,
-            fileCount,
-            dirCount,
-            tree: treeText,
-            totalSize
-        });
+        return c.json(await buildTreeResult(gh, repo, showDetails));
     } catch (err) {
         return c.text(err.message, 500);
     }

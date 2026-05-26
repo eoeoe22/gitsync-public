@@ -90,6 +90,17 @@ export class Github {
     return await this.raw(`/repos/${this.username}/${repo}`);
   }
 
+  async listAllRepos() {
+    const repos = [];
+    const perPage = 100;
+    for (let page = 1; page <= 20; page++) {
+      const batch = await this.raw(`/user/repos?affiliation=owner&sort=updated&per_page=${perPage}&page=${page}`);
+      repos.push(...batch);
+      if (batch.length < perPage) break;
+    }
+    return repos;
+  }
+
   async listCommits(repo, branch = 'main', page = 1, perPage = 20) {
     return await this.raw(`/repos/${this.username}/${repo}/commits?sha=${branch}&page=${page}&per_page=${perPage}`);
   }
