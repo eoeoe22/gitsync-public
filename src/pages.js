@@ -537,6 +537,20 @@ export const layout = (title, body, script = '') => `<!DOCTYPE html>
       user-select: none;
     }
 
+    .ai-checkbox-sub {
+      margin-left: 24px;
+    }
+
+    .ai-checkbox-row input[type="checkbox"]:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .ai-checkbox-row input[type="checkbox"]:disabled + label {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     .diff-text-box {
       margin-top: 16px;
       background: var(--surface-2);
@@ -832,8 +846,12 @@ export const dashboardPage = () => layout('Dashboard', `
     <p class="repo-info">기존 동기화 설정과 무관하게 계정이 소유한 모든 레포지토리의 디렉토리 구조를 추출합니다.</p>
 
     <div class="ai-checkbox-row">
-      <input type="checkbox" id="detailCheck">
+      <input type="checkbox" id="detailCheck" onchange="onDetailCheckChange()">
       <label for="detailCheck">세부정보 표시</label>
+    </div>
+    <div class="ai-checkbox-row ai-checkbox-sub">
+      <input type="checkbox" id="essentialFilesCheck" disabled>
+      <label for="essentialFilesCheck">프로젝트 구조 파악 필수 파일 내용 포함</label>
     </div>
 
     <button id="treeBtn" class="btn-info" onclick="extractTree()">디렉토리 추출</button>
@@ -1152,12 +1170,20 @@ export const dashboardPage = () => layout('Dashboard', `
     }
   }
 
+  function onDetailCheckChange() {
+    const parent = document.getElementById('detailCheck');
+    const child = document.getElementById('essentialFilesCheck');
+    child.disabled = !parent.checked;
+    if (!parent.checked) child.checked = false;
+  }
+
   async function extractTree() {
     const btn = document.getElementById('treeBtn');
     const box = document.getElementById('treeBox');
     const content = document.getElementById('treeContent');
     const title = document.getElementById('treeBoxTitle');
     const showDetails = document.getElementById('detailCheck').checked;
+    const includeEssential = showDetails && document.getElementById('essentialFilesCheck').checked;
     const repo = document.getElementById('extractRepoSelect').value;
 
     if (!repo) {
@@ -1175,7 +1201,7 @@ export const dashboardPage = () => layout('Dashboard', `
       const res = await fetch('/api/sync/extract-tree', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo, showDetails })
+        body: JSON.stringify({ repo, showDetails, includeEssential })
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -1183,6 +1209,9 @@ export const dashboardPage = () => layout('Dashboard', `
       let meta = data.fileCount + '개 파일, ' + data.dirCount + '개 디렉토리, ' + data.branch;
       if (showDetails && data.totalSize != null) {
         meta += ', ' + data.totalSize;
+      }
+      if (includeEssential && data.essentialCount) {
+        meta += ', 필수파일 ' + data.essentialCount + '개';
       }
       title.textContent = '⟩_ ' + data.repo + ' (' + meta + ')';
     } catch (e) {

@@ -7,6 +7,32 @@ import { createTwoFilesPatch } from 'diff';
 
 const app = new Hono();
 
+// IP 화이트리스트(시크릿 환경변수 IP_WHITELIST, 콤마로 구분)에 포함된 클라이언트인지 확인.
+// 화이트리스트에 등록된 IP는 비밀번호 인증을 우회한다.
+function isWhitelistedIp(c) {
+    const raw = c.env.IP_WHITELIST;
+    if (!raw) return false;
+
+    const clientIp = c.req.header('CF-Connecting-IP');
+    if (!clientIp) return false;
+
+    const allowed = raw
+        .split(',')
+        .map((ip) => ip.trim())
+        .filter(Boolean);
+
+    return allowed.includes(clientIp);
+}
+
+// 유효한 세션 쿠키가 있거나, 화이트리스트 IP인 경우 인증된 것으로 간주.
+async function isAuthenticated(c) {
+    if (isWhitelistedIp(c)) return true;
+
+    const secret = c.env.SESSION_SECRET || 'default-secret-fallback-key-for-dev';
+    const session = await getSignedCookie(c, secret, 'auth_session');
+    return Boolean(session);
+}
+
 function getRepoConfigs(env) {
     try {
         return JSON.parse(env.REPO_CONFIGS || '[]');
@@ -204,35 +230,35 @@ app.get('/api/repos', async (c) => {
 
 // Middleware to check authentication on /api/sync/*
 app.use('/api/sync/*', async (c, next) => {
-    const secret = c.env.SESSION_SECRET || 'default-secret-fallback-key-for-dev';
-    const session = await getSignedCookie(c, secret, 'auth_session');
-    if (!session) {
+    if (!(await isAuthenticated(c))) {
         return c.json({ error: 'Unauthorized' }, 401);
     }
     await next();
 });
 
 app.get('/', async (c) => {
-    const secret = c.env.SESSION_SECRET || 'default-secret-fallback-key-for-dev';
-    const session = await getSignedCookie(c, secret, 'auth_session');
-
-    if (session) {
+    if (await isAuthenticated(c)) {
         return c.html(dashboardPage());
     }
     return c.html(loginPage(c.env.TURNSTILE_SITE_KEY || '1x00000000000000000000AA'));
 });
 
 app.post('/api/login', async (c) => {
+    // 화이트리스트 IP는 비밀번호/Turnstile 검증을 건너뛰고 바로 세션을 발급한다.
+    const whitelisted = isWhitelistedIp(c);
+
     const body = await c.req.json();
     const { password, 'cf-turnstile-response': turnstileToken } = body;
 
-    const validPassword = c.env.PASSWORD || 'admin';
-    if (password !== validPassword) {
-        return c.json({ success: false, message: 'Invalid credentials' }, 401);
+    if (!whitelisted) {
+        const validPassword = c.env.PASSWORD || 'admin';
+        if (password !== validPassword) {
+            return c.json({ success: false, message: 'Invalid credentials' }, 401);
+        }
     }
 
     // Verify Turnstile
-    if (c.env.TURNSTILE_SECRET_KEY && c.env.TURNSTILE_SECRET_KEY !== '1x0000000000000000000000000000000AA') {
+    if (!whitelisted && c.env.TURNSTILE_SECRET_KEY && c.env.TURNSTILE_SECRET_KEY !== '1x0000000000000000000000000000000AA') {
         const formData = new FormData();
         formData.append('secret', c.env.TURNSTILE_SECRET_KEY);
         formData.append('response', turnstileToken);
@@ -587,6 +613,16 @@ app.post('/api/sync/diff-info', async (c) => {
 
 // Directory Tree Extraction //
 
+// Files essential for understanding the overall project structure (cloudwiki).
+const ESSENTIAL_FILES = [
+    'COMMON.md',
+    'astro.config.mjs',
+    'vite.config.ts',
+    'wrangler example.toml',
+    'migrations/schema.sql',
+    'package.json',
+];
+
 function formatBytes(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -638,7 +674,7 @@ function buildTreeText(items, fileDetails) {
     return lines.join('\n');
 }
 
-async function buildTreeResult(gh, repo, showDetails) {
+async function buildTreeResult(gh, repo, showDetails, includeEssential) {
     const repoInfo = await gh.getRepoInfo(repo);
     const branch = repoInfo.default_branch || 'main';
 
@@ -661,9 +697,24 @@ async function buildTreeResult(gh, repo, showDetails) {
     const firstLine = showDetails && totalSize
         ? `${repo} (${totalSize})`
         : `${repo}/`;
-    const treeText = `${firstLine}\n${buildTreeText(tree, fileDetails)}`;
 
-    return { repo, branch, fileCount, dirCount, tree: treeText, totalSize };
+    let essentialText = '';
+    let essentialCount = 0;
+    if (includeEssential) {
+        const found = ESSENTIAL_FILES
+            .map(p => blobs.find(b => b.path === p))
+            .filter(Boolean);
+        const sections = await Promise.all(found.map(async (f) => {
+            const text = decodeBase64Text(await gh.getBlobBuffer(repo, f.sha));
+            return `===== ${f.path} =====\n${text ?? '(바이너리 또는 디코딩 실패)'}`;
+        }));
+        essentialCount = found.length;
+        if (sections.length) essentialText = '\n\n' + sections.join('\n\n');
+    }
+
+    const treeText = `${firstLine}\n${buildTreeText(tree, fileDetails)}${essentialText}`;
+
+    return { repo, branch, fileCount, dirCount, tree: treeText, totalSize, essentialCount };
 }
 
 // List all repositories owned by the configured GitHub account
@@ -688,9 +739,10 @@ app.post('/api/sync/extract-tree', async (c) => {
         const body = await c.req.json().catch(() => ({}));
         const repo = body.repo;
         const showDetails = body.showDetails ?? false;
+        const includeEssential = (body.includeEssential ?? false) && showDetails;
         if (!repo) return c.text('repo is required', 400);
         const gh = new Github(c.env);
-        return c.json(await buildTreeResult(gh, repo, showDetails));
+        return c.json(await buildTreeResult(gh, repo, showDetails, includeEssential));
     } catch (err) {
         return c.text(err.message, 500);
     }
