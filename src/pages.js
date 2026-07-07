@@ -746,6 +746,7 @@ export const dashboardPage = () => layout('Dashboard', `
   <div class="tab-bar">
     <button type="button" class="tab-btn active" id="tabBtn-sync" onclick="switchTab('sync')">동기화</button>
     <button type="button" class="tab-btn" id="tabBtn-extract" onclick="switchTab('extract')">디렉토리 추출</button>
+    <button type="button" class="tab-btn" id="tabBtn-release" onclick="switchTab('release')">릴리즈 노트</button>
   </div>
 
   <div class="tab-panel active" id="tabPanel-sync">
@@ -865,11 +866,60 @@ export const dashboardPage = () => layout('Dashboard', `
     </div>
   </div>
 
+  <div class="tab-panel" id="tabPanel-release">
+    <div class="repo-select-group">
+      <label for="releaseRepoSelect">저장소 선택</label>
+      <select id="releaseRepoSelect" onchange="selectReleaseRepo(this.value)"></select>
+    </div>
+
+    <div class="repo-info" id="releaseRepoInfo"></div>
+
+    <div class="stats-card">
+      <div class="stat-item">
+        <div class="stat-val" id="releaseAddedStat">-</div>
+        <div class="stat-label">추가</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="releaseModifiedStat">-</div>
+        <div class="stat-label">수정</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="releaseDeletedStat">-</div>
+        <div class="stat-label">삭제</div>
+      </div>
+    </div>
+
+    <div class="ai-checkbox-row">
+      <input type="checkbox" id="releaseAiSummaryCheck" checked>
+      <label for="releaseAiSummaryCheck">AI 릴리즈 노트 요약</label>
+    </div>
+    <div class="ai-checkbox-row">
+      <input type="checkbox" id="releaseDiffTextCheck" checked>
+      <label for="releaseDiffTextCheck">Diff 텍스트 표시</label>
+    </div>
+
+    <button id="releaseCheckBtn" class="btn-secondary" onclick="checkReleaseDiff()">최신 릴리즈 대비 변경사항 확인</button>
+
+    <div class="ai-summary-box" id="releaseSummaryBox">
+      <div class="ai-summary-header">✦ AI 릴리즈 노트 요약</div>
+      <div class="ai-summary-content" id="releaseSummaryContent"></div>
+    </div>
+
+    <div class="diff-text-box" id="releaseDiffTextBox">
+      <div class="diff-text-header">
+        <span>⟩_ Diff 텍스트</span>
+        <button class="copy-btn" onclick="copyReleaseDiffText()">클립보드 복사</button>
+      </div>
+      <div class="diff-text-content" id="releaseDiffTextContent"></div>
+    </div>
+  </div>
+
   <button id="logoutBtn" class="btn-secondary mt-12" onclick="logout()">로그아웃</button>
 `, `
 <script>
   let repoConfigs = [];
   let currentRepoIndex = 0;
+  let releaseRepoIndex = 0;
   let rollbackPage = 1;
   let selectedCommitSha = null;
   let lastAutoCommitMsg = '';
@@ -916,8 +966,10 @@ export const dashboardPage = () => layout('Dashboard', `
       if (!res.ok) throw new Error('저장소 설정을 불러오지 못했습니다.');
       repoConfigs = await res.json();
       renderRepoSelect();
+      renderReleaseRepoSelect();
       if (repoConfigs.length > 0) {
         selectRepo(0);
+        selectReleaseRepo(0);
       }
     } catch (e) {
       alert(e.message);
@@ -957,6 +1009,126 @@ export const dashboardPage = () => layout('Dashboard', `
     resetUI();
     resetRollbackUI();
     loadRollbackCommits(1);
+  }
+
+  function renderReleaseRepoSelect() {
+    const select = document.getElementById('releaseRepoSelect');
+    select.innerHTML = '';
+    repoConfigs.forEach((cfg, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = cfg.name;
+      select.appendChild(opt);
+    });
+  }
+
+  function selectReleaseRepo(index) {
+    releaseRepoIndex = parseInt(index);
+    const cfg = repoConfigs[releaseRepoIndex];
+    if (!cfg) return;
+
+    document.getElementById('releaseRepoSelect').value = releaseRepoIndex;
+    document.getElementById('releaseRepoInfo').innerHTML = '<div><span>' + cfg.publicRepo + '</span> (공개 저장소)</div>';
+
+    resetReleaseUI();
+  }
+
+  function resetReleaseUI() {
+    document.getElementById('releaseAddedStat').textContent = '-';
+    document.getElementById('releaseModifiedStat').textContent = '-';
+    document.getElementById('releaseDeletedStat').textContent = '-';
+    document.getElementById('releaseSummaryBox').style.display = 'none';
+    document.getElementById('releaseSummaryContent').textContent = '';
+    document.getElementById('releaseDiffTextBox').style.display = 'none';
+    document.getElementById('releaseDiffTextContent').textContent = '';
+  }
+
+  async function checkReleaseDiff() {
+    const btn = document.getElementById('releaseCheckBtn');
+    const summaryBox = document.getElementById('releaseSummaryBox');
+    const summaryContent = document.getElementById('releaseSummaryContent');
+    const diffTextBox = document.getElementById('releaseDiffTextBox');
+    const diffTextContent = document.getElementById('releaseDiffTextContent');
+
+    const wantAI = document.getElementById('releaseAiSummaryCheck').checked;
+    const wantDiff = document.getElementById('releaseDiffTextCheck').checked;
+
+    btn.disabled = true;
+    btn.textContent = '확인 중...';
+    resetReleaseUI();
+
+    if (wantAI) {
+      summaryContent.textContent = 'AI 릴리즈 노트 생성 중...';
+      summaryBox.style.display = 'block';
+    }
+    if (wantDiff) {
+      diffTextContent.textContent = 'Diff 텍스트 생성 중...';
+      diffTextBox.style.display = 'block';
+    }
+
+    try {
+      const res = await fetch('/api/sync/release-diff-info', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ repoIndex: releaseRepoIndex, wantAI, wantDiff })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      if (!data.release) {
+        if (wantAI) summaryContent.textContent = data.message || '릴리즈가 없습니다.';
+        if (wantDiff) diffTextBox.style.display = 'none';
+        return;
+      }
+
+      document.getElementById('releaseAddedStat').textContent = data.added;
+      document.getElementById('releaseModifiedStat').textContent = data.modified;
+      document.getElementById('releaseDeletedStat').textContent = data.deleted;
+
+      if (wantAI) {
+        if (data.summaryError) {
+          summaryContent.textContent = 'AI 요약 실패: ' + data.summaryError;
+        } else {
+          summaryContent.innerHTML = data.summary ? marked.parse(data.summary) : '요약 생성 실패';
+        }
+        (data.summaryFallbacks || []).forEach((fb, idx) => {
+          setTimeout(() => {
+            Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'warning',
+              title: fb.model + ' 실패 → ' + fb.next + ' 로 전환',
+              showConfirmButton: false,
+              timer: 4000,
+              timerProgressBar: true
+            });
+          }, idx * 600);
+        });
+      }
+
+      if (wantDiff) {
+        diffTextContent.textContent = data.diff || 'Diff 생성 실패';
+      }
+    } catch (e) {
+      if (wantAI) summaryContent.textContent = 'AI 요약 실패: ' + e.message;
+      if (wantDiff) diffTextContent.textContent = 'Diff 생성 실패: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '최신 릴리즈 대비 변경사항 확인';
+    }
+  }
+
+  async function copyReleaseDiffText() {
+    const text = document.getElementById('releaseDiffTextContent').textContent;
+    const btn = document.querySelector('#releaseDiffTextBox .copy-btn');
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = '복사됨!';
+      setTimeout(() => { btn.textContent = '클립보드 복사'; }, 2000);
+    } catch {
+      btn.textContent = '복사 실패';
+      setTimeout(() => { btn.textContent = '클립보드 복사'; }, 2000);
+    }
   }
 
   function resetUI() {

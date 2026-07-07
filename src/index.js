@@ -430,40 +430,44 @@ function truncatePatchBody(body, maxLines) {
     return `${lines.slice(0, maxLines).join('\n')}\n... (이하 ${omitted}줄 생략)`;
 }
 
-async function buildFileDiff(gh, config, f, maxLines, maxInputChars) {
+async function buildFileDiffBetween(gh, newRepo, oldRepo, path, newSha, oldSha, maxLines, maxInputChars) {
     const [newBase64, oldBase64] = await Promise.all([
-        gh.getBlobBuffer(config.privateRepo, f.sha),
-        f.pubSha ? gh.getBlobBuffer(config.publicRepo, f.pubSha) : Promise.resolve(null)
+        gh.getBlobBuffer(newRepo, newSha),
+        oldSha ? gh.getBlobBuffer(oldRepo, oldSha) : Promise.resolve(null)
     ]);
 
     const newText = decodeBase64Text(newBase64);
     if (newText === null) {
-        return `=== ${f.path} (바이너리 파일, 내용 생략) ===`;
+        return `=== ${path} (바이너리 파일, 내용 생략) ===`;
     }
 
-    if (f.pubSha) {
+    if (oldSha) {
         const oldText = decodeBase64Text(oldBase64);
         const oldStr = oldText === null ? '' : oldText;
 
         if (oldStr.length > maxInputChars || newText.length > maxInputChars) {
-            return `=== ${f.path} (수정됨, 파일이 너무 커서 diff 생략) ===`;
+            return `=== ${path} (수정됨, 파일이 너무 커서 diff 생략) ===`;
         }
 
-        const patch = createTwoFilesPatch(f.path, f.path, oldStr, newText, '', '', { context: 3 });
+        const patch = createTwoFilesPatch(path, path, oldStr, newText, '', '', { context: 3 });
         const body = extractPatchBody(patch);
         if (body.trim() === '') {
-            return `=== ${f.path} (수정됨) ===\n(변경 없음)`;
+            return `=== ${path} (수정됨) ===\n(변경 없음)`;
         }
-        return `=== ${f.path} (수정됨) ===\n${truncatePatchBody(body, maxLines)}`;
+        return `=== ${path} (수정됨) ===\n${truncatePatchBody(body, maxLines)}`;
     }
 
     if (newText.length > maxInputChars) {
-        return `=== ${f.path} (새로 추가됨, 파일이 너무 커서 내용 생략) ===`;
+        return `=== ${path} (새로 추가됨, 파일이 너무 커서 내용 생략) ===`;
     }
 
-    const patch = createTwoFilesPatch('/dev/null', f.path, '', newText, '', '', { context: 0 });
+    const patch = createTwoFilesPatch('/dev/null', path, '', newText, '', '', { context: 0 });
     const body = extractPatchBody(patch);
-    return `=== ${f.path} (새로 추가됨) ===\n${truncatePatchBody(body, maxLines)}`;
+    return `=== ${path} (새로 추가됨) ===\n${truncatePatchBody(body, maxLines)}`;
+}
+
+async function buildFileDiff(gh, config, f, maxLines, maxInputChars) {
+    return buildFileDiffBetween(gh, config.privateRepo, config.publicRepo, f.path, f.sha, f.pubSha, maxLines, maxInputChars);
 }
 
 async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 300, maxInputChars = 200 * 1024) {
@@ -483,6 +487,77 @@ async function buildDiffContent(gh, config, toUpload, maxFiles = 10, maxLines = 
     return sections.join('\n\n');
 }
 
+// Release vs main-branch diff (public repo) //
+
+async function buildReleaseDiffPlan(gh, config) {
+    const repo = config.publicRepo;
+    const release = await gh.getLatestReleaseOrNull(repo);
+    if (!release) {
+        return { release: null, added: [], modified: [], deleted: [] };
+    }
+
+    const releaseCommit = await gh.getCommitByRef(repo, release.tag_name);
+    const mainCommitSha = await gh.getLatestCommitSha(repo, 'main');
+
+    const releaseTreeSha = await gh.getCommitTreeSha(repo, releaseCommit.sha);
+    const mainTreeSha = await gh.getCommitTreeSha(repo, mainCommitSha);
+
+    const releaseTree = await gh.getTreeRecursive(repo, releaseTreeSha);
+    const mainTree = await gh.getTreeRecursive(repo, mainTreeSha);
+
+    const releaseFiles = releaseTree.filter(item => item.type === 'blob');
+    const mainFiles = mainTree.filter(item => item.type === 'blob');
+
+    const releaseMap = new Map(releaseFiles.map(f => [f.path, f.sha]));
+    const mainMap = new Map(mainFiles.map(f => [f.path, f.sha]));
+
+    const added = [];
+    const modified = [];
+
+    mainFiles.forEach(f => {
+        const oldSha = releaseMap.get(f.path);
+        if (oldSha === undefined) {
+            added.push(f);
+        } else if (oldSha !== f.sha) {
+            modified.push({ ...f, oldSha });
+        }
+    });
+
+    const deleted = releaseFiles.filter(f => !mainMap.has(f.path));
+
+    return {
+        release: {
+            tagName: release.tag_name,
+            name: release.name,
+            publishedAt: release.published_at,
+            htmlUrl: release.html_url
+        },
+        added,
+        modified,
+        deleted
+    };
+}
+
+async function buildReleaseDiffContent(gh, repo, added, modified, deleted, maxFiles = 10, maxLines = 300, maxInputChars = 200 * 1024) {
+    const changed = [...modified, ...added];
+    const targets = changed.slice(0, maxFiles);
+
+    const sections = await Promise.all(
+        targets.map(f =>
+            buildFileDiffBetween(gh, repo, repo, f.path, f.sha, f.oldSha, maxLines, maxInputChars)
+                .catch(err => `=== ${f.path} (diff 생성 실패: ${err.message}) ===`)
+        )
+    );
+
+    if (changed.length > maxFiles) {
+        sections.push(`... 그 외 ${changed.length - maxFiles}개 파일은 내용 생략`);
+    }
+
+    deleted.forEach(f => sections.push(`=== ${f.path} (삭제됨) ===`));
+
+    return sections.join('\n\n');
+}
+
 // Consolidated Diff & Summary Endpoint //
 
 const AI_FALLBACK_CHAIN = [
@@ -490,6 +565,61 @@ const AI_FALLBACK_CHAIN = [
     { provider: 'gemini', model: 'gemini-3.1-flash-lite-preview' },
     { provider: 'workers-ai', model: '@cf/google/gemma-4-26b-a4b-it' }
 ];
+
+function createAiCaller(env) {
+    const apiKey = env.GEMINI_API_KEY;
+    const gemini = apiKey ? new GoogleGenAI({ apiKey }) : null;
+
+    const callOne = async (modelInfo, prompt, budget) => {
+        if (modelInfo.provider === 'workers-ai') {
+            if (!env.AI) throw new Error('Workers AI 바인딩이 설정되지 않았습니다.');
+            const response = await env.AI.run(modelInfo.model, {
+                messages: [{ role: 'user', content: prompt }]
+            });
+            const text = response.response
+                ?? response.result?.response
+                ?? response.choices?.[0]?.message?.content
+                ?? response.result?.choices?.[0]?.message?.content
+                ?? '';
+            return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        }
+        if (!gemini) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
+        const response = await gemini.models.generateContent({
+            model: modelInfo.model,
+            contents: prompt,
+            config: { thinkingConfig: { thinkingBudget: budget } }
+        });
+        return response.text;
+    };
+
+    return async function callAI(prompt, budget = 1024) {
+        const errors = [];
+        const fallbacks = [];
+        for (let i = 0; i < AI_FALLBACK_CHAIN.length; i++) {
+            const modelInfo = AI_FALLBACK_CHAIN[i];
+            console.log(`[AI] 시도 ${i + 1}/${AI_FALLBACK_CHAIN.length}: ${modelInfo.model}`);
+            const hasNext = i + 1 < AI_FALLBACK_CHAIN.length;
+            try {
+                const text = await callOne(modelInfo, prompt, budget);
+                if (text && text.trim()) {
+                    console.log(`[AI] 성공: ${modelInfo.model}`);
+                    return { text, fallbacks };
+                }
+                const reason = '빈 응답';
+                console.warn(`[AI] 빈 응답: ${modelInfo.model}${hasNext ? ' → 다음 모델로 전환' : ''}`);
+                errors.push(`${modelInfo.model}: ${reason}`);
+                if (hasNext) fallbacks.push({ model: modelInfo.model, reason, next: AI_FALLBACK_CHAIN[i + 1].model });
+            } catch (err) {
+                const reason = err.message;
+                console.warn(`[AI] 실패: ${modelInfo.model} — ${reason}${hasNext ? ' → 다음 모델로 전환' : ''}`);
+                errors.push(`${modelInfo.model}: ${reason}`);
+                if (hasNext) fallbacks.push({ model: modelInfo.model, reason, next: AI_FALLBACK_CHAIN[i + 1].model });
+            }
+        }
+        console.error(`[AI] 모든 모델 실패 — ${errors.join(' | ')}`);
+        throw new Error(`모든 모델 실패 — ${errors.join(' | ')}`);
+    };
+}
 
 app.post('/api/sync/diff-info', async (c) => {
     try {
@@ -518,58 +648,7 @@ app.post('/api/sync/diff-info', async (c) => {
             ...toDelete.map(f => `[삭제] ${f.path}`)
         ].join('\n');
 
-        const apiKey = c.env.GEMINI_API_KEY;
-        const gemini = apiKey ? new GoogleGenAI({ apiKey }) : null;
-
-        const callOne = async (modelInfo, prompt, budget) => {
-            if (modelInfo.provider === 'workers-ai') {
-                if (!c.env.AI) throw new Error('Workers AI 바인딩이 설정되지 않았습니다.');
-                const response = await c.env.AI.run(modelInfo.model, {
-                    messages: [{ role: 'user', content: prompt }]
-                });
-                const text = response.response
-                    ?? response.result?.response
-                    ?? response.choices?.[0]?.message?.content
-                    ?? response.result?.choices?.[0]?.message?.content
-                    ?? '';
-                return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-            }
-            if (!gemini) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
-            const response = await gemini.models.generateContent({
-                model: modelInfo.model,
-                contents: prompt,
-                config: { thinkingConfig: { thinkingBudget: budget } }
-            });
-            return response.text;
-        };
-
-        const callAI = async (prompt, budget = 1024) => {
-            const errors = [];
-            const fallbacks = [];
-            for (let i = 0; i < AI_FALLBACK_CHAIN.length; i++) {
-                const modelInfo = AI_FALLBACK_CHAIN[i];
-                console.log(`[AI] 시도 ${i + 1}/${AI_FALLBACK_CHAIN.length}: ${modelInfo.model}`);
-                const hasNext = i + 1 < AI_FALLBACK_CHAIN.length;
-                try {
-                    const text = await callOne(modelInfo, prompt, budget);
-                    if (text && text.trim()) {
-                        console.log(`[AI] 성공: ${modelInfo.model}`);
-                        return { text, fallbacks };
-                    }
-                    const reason = '빈 응답';
-                    console.warn(`[AI] 빈 응답: ${modelInfo.model}${hasNext ? ' → 다음 모델로 전환' : ''}`);
-                    errors.push(`${modelInfo.model}: ${reason}`);
-                    if (hasNext) fallbacks.push({ model: modelInfo.model, reason, next: AI_FALLBACK_CHAIN[i + 1].model });
-                } catch (err) {
-                    const reason = err.message;
-                    console.warn(`[AI] 실패: ${modelInfo.model} — ${reason}${hasNext ? ' → 다음 모델로 전환' : ''}`);
-                    errors.push(`${modelInfo.model}: ${reason}`);
-                    if (hasNext) fallbacks.push({ model: modelInfo.model, reason, next: AI_FALLBACK_CHAIN[i + 1].model });
-                }
-            }
-            console.error(`[AI] 모든 모델 실패 — ${errors.join(' | ')}`);
-            throw new Error(`모든 모델 실패 — ${errors.join(' | ')}`);
-        };
+        const callAI = createAiCaller(c.env);
 
         const tasks = [];
 
@@ -606,6 +685,84 @@ app.post('/api/sync/diff-info', async (c) => {
         }
 
         return c.json({ summary, summaryError, summaryFallbacks, diff: diffText, commitMessage, commitMessageError, commitMsgFallbacks });
+    } catch (err) {
+        return c.text(err.message, 500);
+    }
+});
+
+// Release vs Main-branch Diff & Summary Endpoint //
+
+app.post('/api/sync/release-diff-info', async (c) => {
+    try {
+        const body = await c.req.json().catch(() => ({}));
+        const { repoIndex, wantAI, wantDiff } = body;
+        const config = getRepoConfig(c.env, repoIndex ?? 0);
+        const gh = new Github(c.env);
+
+        const plan = await buildReleaseDiffPlan(gh, config);
+
+        if (!plan.release) {
+            return c.json({
+                release: null,
+                added: 0,
+                modified: 0,
+                deleted: 0,
+                summary: null,
+                summaryError: null,
+                summaryFallbacks: [],
+                diff: null,
+                message: '공개 저장소에 릴리즈가 없습니다.'
+            });
+        }
+
+        const totalChanges = plan.added.length + plan.modified.length + plan.deleted.length;
+
+        let diffContent = null;
+        if ((wantAI || wantDiff) && totalChanges > 0) {
+            diffContent = await buildReleaseDiffContent(gh, config.publicRepo, plan.added, plan.modified, plan.deleted);
+        }
+
+        const fileLines = [
+            ...plan.added.map(f => `[추가] ${f.path}`),
+            ...plan.modified.map(f => `[수정] ${f.path}`),
+            ...plan.deleted.map(f => `[삭제] ${f.path}`)
+        ].join('\n');
+
+        let summary = null;
+        let summaryError = null;
+        let summaryFallbacks = [];
+        let diffText = null;
+
+        if (wantAI) {
+            if (totalChanges === 0) {
+                summary = `최신 릴리즈(${plan.release.tagName}) 이후 변경사항이 없습니다.`;
+            } else {
+                const callAI = createAiCaller(c.env);
+                const prompt = `다음은 공개 저장소의 최신 릴리즈(${plan.release.tagName})와 현재 main 브랜치 사이의 변경사항입니다.\n\n[변경 파일 목록]\n${fileLines}\n\n[파일 내용 diff]\n${diffContent || '(변경사항 없음)'}\n\n위 변경사항을 바탕으로 릴리즈 노트 초안을 한국어로 작성해주세요. 주요 기능 추가, 개선사항, 버그 수정 등을 구분하여 정리하고, 전체적인 변경의 의미를 설명해주세요.`;
+                try {
+                    const { text, fallbacks } = await callAI(prompt, 1024);
+                    summary = text;
+                    summaryFallbacks = fallbacks;
+                } catch (err) {
+                    summaryError = err.message;
+                }
+            }
+        }
+
+        if (wantDiff) {
+            diffText = `[릴리즈 ${plan.release.tagName} → main]\n\n[변경 파일 목록]\n${fileLines || '(변경사항 없음)'}\n\n[파일 내용]\n${diffContent || '(변경사항 없음)'}`;
+        }
+
+        return c.json({
+            release: plan.release,
+            added: plan.added.length,
+            modified: plan.modified.length,
+            deleted: plan.deleted.length,
+            summary,
+            summaryError,
+            summaryFallbacks,
+            diff: diffText
+        });
     } catch (err) {
         return c.text(err.message, 500);
     }

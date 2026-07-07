@@ -90,6 +90,23 @@ export class Github {
     return await this.raw(`/repos/${this.username}/${repo}`);
   }
 
+  async getLatestReleaseOrNull(repo) {
+    const res = await fetch(`https://api.github.com/repos/${this.username}/${repo}/releases/latest`, {
+      headers: this.getHeaders()
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`GitHub API Error (${res.status}) on ${repo}/releases/latest:`, err);
+      throw new Error(`GitHub API Error: ${res.statusText}`);
+    }
+    return res.json();
+  }
+
+  async getCommitByRef(repo, ref) {
+    return await this.raw(`/repos/${this.username}/${repo}/commits/${encodeURIComponent(ref)}`);
+  }
+
   async listAllRepos() {
     const repos = [];
     const perPage = 100;
